@@ -1,0 +1,32 @@
+{
+  "name": "@honeybeaers/node-persistence-api",
+  "version": "0.1.0",
+  "description": "Node and TypeScript persistence API with generated repository clients",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "npa": "dist/cli/npa.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/**/*.test.js",
+    "prepack": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "node",
+    "typescript",
+    "persistence",
+    "repository",
+    "orm"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "packageManager": "pnpm@10.30.2+sha512.36cdc707e7b7940a988c9c1ecf88d084f8514b5c3f085f53a2e244c2921d3b2545bc20dd4ebe1fc245feec463bb298aecea7a63ed1f7680b877dc6379d8d0cb4"
+}
