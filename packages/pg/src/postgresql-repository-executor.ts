@@ -1,6 +1,11 @@
-import { NPARepositoryAdapter, RepositoryMethodExecutor } from "../repository";
+import { NPARepositoryAdapter, RepositoryMethodExecutor } from "@honeybeaers/node-persistence-api-core";
 import {
+  compilePostgresqlCount,
+  compilePostgresqlDeleteAll,
   compilePostgresqlDeleteById,
+  compilePostgresqlExistsById,
+  compilePostgresqlFindAll,
+  compilePostgresqlFindById,
   compilePostgresqlInsert,
   compilePostgresqlUpdate,
   getPrimaryKeyValue,
@@ -34,6 +39,40 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   };
 
   execute = this.executeDerivedQuery;
+
+  findById = async (id: TId): Promise<TEntity | null> => {
+    const query = compilePostgresqlFindById(id, this.options);
+    const result = await this.options.queryable.query<TEntity>(
+      query.text,
+      query.values,
+    );
+
+    return result.rows[0] ?? null;
+  };
+
+  findAll = async (): Promise<TEntity[]> => {
+    const query = compilePostgresqlFindAll(this.options);
+    const result = await this.options.queryable.query<TEntity>(
+      query.text,
+      query.values,
+    );
+
+    return result.rows;
+  };
+
+  existsById = async (id: TId): Promise<boolean> => {
+    const query = compilePostgresqlExistsById(id, this.options);
+    const result = await this.options.queryable.query(query.text, query.values);
+
+    return Boolean(result.rows[0]?.exists);
+  };
+
+  count = async (): Promise<number> => {
+    const query = compilePostgresqlCount(this.options);
+    const result = await this.options.queryable.query(query.text, query.values);
+
+    return Number(result.rows[0]?.count ?? 0);
+  };
 
   save = async (
     entity: TEntity,
@@ -91,6 +130,13 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
   deleteById = async (id: TId): Promise<number> => {
     const query = compilePostgresqlDeleteById(id, this.options);
+    const result = await this.options.queryable.query(query.text, query.values);
+
+    return result.rowCount ?? 0;
+  };
+
+  deleteAll = async (): Promise<number> => {
+    const query = compilePostgresqlDeleteAll(this.options);
     const result = await this.options.queryable.query(query.text, query.values);
 
     return result.rowCount ?? 0;

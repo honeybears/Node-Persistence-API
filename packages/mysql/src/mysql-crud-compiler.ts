@@ -92,6 +92,50 @@ export function compileMysqlFindById(
   };
 }
 
+export function compileMysqlExistsById(
+  id: unknown,
+  options: MysqlQueryCompilerOptions,
+): MysqlCompiledQuery {
+  assertId(id);
+
+  return {
+    text: `SELECT EXISTS(SELECT 1 FROM ${quoteMysqlTable(
+      options,
+    )} WHERE ${mysqlPropertyToColumn(
+      mysqlPrimaryKeyProperty(options),
+      options,
+    )} = ?) AS \`exists\``,
+    values: [id],
+  };
+}
+
+export function compileMysqlFindAll(
+  options: MysqlQueryCompilerOptions,
+): MysqlCompiledQuery {
+  return {
+    text: `SELECT * FROM ${quoteMysqlTable(options)}`,
+    values: [],
+  };
+}
+
+export function compileMysqlCount(
+  options: MysqlQueryCompilerOptions,
+): MysqlCompiledQuery {
+  return {
+    text: `SELECT COUNT(*) AS \`count\` FROM ${quoteMysqlTable(options)}`,
+    values: [],
+  };
+}
+
+export function compileMysqlDeleteAll(
+  options: MysqlQueryCompilerOptions,
+): MysqlCompiledQuery {
+  return {
+    text: `DELETE FROM ${quoteMysqlTable(options)}`,
+    values: [],
+  };
+}
+
 export function getMysqlPrimaryKeyValue<TEntity extends object>(
   entity: TEntity,
   options: MysqlQueryCompilerOptions,

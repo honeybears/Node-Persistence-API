@@ -11,6 +11,10 @@ const FIND_ACTIONS = [
   { prefix: "deleteBy", result: "Promise<number>" },
 ];
 
+const CORE_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-core";
+const POSTGRESQL_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-pg";
+const MYSQL_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-mysql";
+
 export function generateNPAClient(
   options: GenerateNPAClientOptions,
 ): GeneratedFile {
@@ -70,7 +74,12 @@ function renderEntityImports(
 function renderRepository(entity: ParsedEntitySource): string {
   const idType = getIdType(entity);
   const methods = entity.columns.flatMap((column) =>
-    renderColumnMethods(entity.className, column.propertyName, column.type),
+    renderColumnMethods(
+      entity.className,
+      column.propertyName,
+      column.type,
+      column.primary,
+    ),
   );
 
   return [
@@ -84,12 +93,17 @@ function renderColumnMethods(
   entityName: string,
   propertyName: string,
   propertyType: string,
+  primary: boolean,
 ): string[] {
   const suffix = toPascalCase(propertyName);
   const valueType = `NonNullable<${entityName}["${propertyName}"]>`;
   const methods: string[] = [];
 
-  methods.push(...renderActionMethods(entityName, suffix, `value: ${valueType}`));
+  methods.push(
+    ...renderActionMethods(entityName, suffix, `value: ${valueType}`).filter(
+      (method) => !primary || !method.startsWith(`findBy${suffix}(`),
+    ),
+  );
   methods.push(...renderActionMethods(entityName, `${suffix}In`, `values: ${valueType}[]`));
   methods.push(...renderActionMethods(entityName, `${suffix}NotIn`, `values: ${valueType}[]`));
   methods.push(...renderActionMethods(entityName, `${suffix}IsNull`, ""));
@@ -137,8 +151,17 @@ function renderLibraryImport(options: GenerateNPAClientOptions): string {
     options.adapter === "mysql"
       ? "MysqlQueryable, createMysqlDerivedQueryRepository"
       : "PostgresqlQueryable, createPostgresqlDerivedQueryRepository";
+  const coreLibraryImport = getCoreLibraryImport(options);
+  const adapterLibraryImport = getAdapterLibraryImport(options);
 
-  return `import { NPARepository, ${adapterImport} } from "${options.libraryImport}";`;
+  if (coreLibraryImport === adapterLibraryImport) {
+    return `import { NPARepository, ${adapterImport} } from "${coreLibraryImport}";`;
+  }
+
+  return [
+    `import { NPARepository } from "${coreLibraryImport}";`,
+    `import { ${adapterImport} } from "${adapterLibraryImport}";`,
+  ].join("\n");
 }
 
 function renderClientInterface(
@@ -178,7 +201,7 @@ function renderFactory(
         options.adapter === "mysql"
           ? "createMysqlDerivedQueryRepository"
           : "createPostgresqlDerivedQueryRepository";
-      return `    ${propertyName}: ${factory}<${entity.className}Repository, ${entity.className}, ${idType}>({}, { entity: ${entity.className}, queryable: options.${options.adapter}.queryable }),`;
+      return `    ${propertyName}: ${factory}<${entity.className}Repository, ${entity.className}, ${idType}>({} as ${entity.className}Repository, { entity: ${entity.className}, queryable: options.${options.adapter}.queryable }),`;
     }),
     "  };",
     "}",
@@ -220,4 +243,22 @@ function isComparableType(value: string): boolean {
 
 function normalizeType(value: string): string {
   return value.replace(/\s*\|\s*undefined/g, "").replace(/\s*\|\s*null/g, "").trim();
+}
+
+function getCoreLibraryImport(options: GenerateNPAClientOptions): string {
+  return options.coreLibraryImport ?? options.libraryImport ?? CORE_LIBRARY_IMPORT;
+}
+
+function getAdapterLibraryImport(options: GenerateNPAClientOptions): string {
+  if (options.adapterLibraryImport) {
+    return options.adapterLibraryImport;
+  }
+
+  if (options.libraryImport) {
+    return options.libraryImport;
+  }
+
+  return options.adapter === "mysql"
+    ? MYSQL_LIBRARY_IMPORT
+    : POSTGRESQL_LIBRARY_IMPORT;
 }

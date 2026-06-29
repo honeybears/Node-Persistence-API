@@ -82,6 +82,65 @@ export function compilePostgresqlDeleteById(
   };
 }
 
+export function compilePostgresqlFindById(
+  id: unknown,
+  options: PostgresqlQueryCompilerOptions,
+): PostgresqlCompiledQuery {
+  assertId(id);
+
+  return {
+    text: `SELECT * FROM ${quoteTable(options)} WHERE ${propertyToColumn(
+      primaryKeyProperty(options),
+      options,
+    )} = $1 LIMIT 1`,
+    values: [id],
+  };
+}
+
+export function compilePostgresqlExistsById(
+  id: unknown,
+  options: PostgresqlQueryCompilerOptions,
+): PostgresqlCompiledQuery {
+  assertId(id);
+
+  return {
+    text: `SELECT EXISTS(SELECT 1 FROM ${quoteTable(
+      options,
+    )} WHERE ${propertyToColumn(
+      primaryKeyProperty(options),
+      options,
+    )} = $1) AS "exists"`,
+    values: [id],
+  };
+}
+
+export function compilePostgresqlFindAll(
+  options: PostgresqlQueryCompilerOptions,
+): PostgresqlCompiledQuery {
+  return {
+    text: `SELECT * FROM ${quoteTable(options)}`,
+    values: [],
+  };
+}
+
+export function compilePostgresqlCount(
+  options: PostgresqlQueryCompilerOptions,
+): PostgresqlCompiledQuery {
+  return {
+    text: `SELECT COUNT(*)::int AS "count" FROM ${quoteTable(options)}`,
+    values: [],
+  };
+}
+
+export function compilePostgresqlDeleteAll(
+  options: PostgresqlQueryCompilerOptions,
+): PostgresqlCompiledQuery {
+  return {
+    text: `DELETE FROM ${quoteTable(options)}`,
+    values: [],
+  };
+}
+
 export function primaryKeyProperty(
   options: PostgresqlQueryCompilerOptions,
 ): string {

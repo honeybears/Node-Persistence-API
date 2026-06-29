@@ -3,12 +3,18 @@ const test = require("node:test");
 
 const {
   compilePostgresqlDeleteById,
+  compilePostgresqlDeleteAll,
+  compilePostgresqlExistsById,
+  compilePostgresqlFindAll,
+  compilePostgresqlFindById,
   compilePostgresqlInsert,
+  compilePostgresqlCount,
   compilePostgresqlQuery,
   compilePostgresqlUpdate,
   createPostgresqlDerivedQueryRepository,
-  parseQueryMethod,
-} = require("../dist");
+  PostgresqlConnection,
+} = require("../packages/pg/dist");
+const { parseQueryMethod } = require("../dist");
 
 test("compiles a derived query method into parameterized PostgreSQL SQL", () => {
   const compiled = compilePostgresqlQuery(
@@ -155,11 +161,64 @@ test("compiles insert, update, and deleteById PostgreSQL CRUD SQL", () => {
   });
 });
 
+test("compiles JPA-style PostgreSQL repository SQL", () => {
+  const options = {
+    tableName: "users",
+    columns: {
+      createdAt: "created_at",
+    },
+  };
+
+  assert.deepEqual(compilePostgresqlFindById(1, options), {
+    text: 'SELECT * FROM "users" WHERE "id" = $1 LIMIT 1',
+    values: [1],
+  });
+  assert.deepEqual(compilePostgresqlExistsById(1, options), {
+    text:
+      'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
+    values: [1],
+  });
+  assert.deepEqual(compilePostgresqlFindAll(options), {
+    text: 'SELECT * FROM "users"',
+    values: [],
+  });
+  assert.deepEqual(compilePostgresqlCount(options), {
+    text: 'SELECT COUNT(*)::int AS "count" FROM "users"',
+    values: [],
+  });
+  assert.deepEqual(compilePostgresqlDeleteAll(options), {
+    text: 'DELETE FROM "users"',
+    values: [],
+  });
+});
+
 test("runs save, insert, updateById, and deleteById through a PostgreSQL queryable", async () => {
   const calls = [];
   const queryable = {
     async query(text, values) {
       calls.push({ text, values });
+
+      if (text.startsWith("SELECT EXISTS")) {
+        return { rows: [{ exists: true }], rowCount: 1 };
+      }
+
+      if (text.startsWith("SELECT COUNT")) {
+        return { rows: [{ count: 1 }], rowCount: 1 };
+      }
+
+      if (text === 'SELECT * FROM "users"') {
+        return {
+          rows: [{ id: 1, name: "kim", created_at: 3 }],
+          rowCount: 1,
+        };
+      }
+
+      if (text.startsWith('SELECT * FROM "users" WHERE')) {
+        return {
+          rows: [{ id: values[0], name: "kim", created_at: 3 }],
+          rowCount: 1,
+        };
+      }
 
       if (text.startsWith("DELETE")) {
         return { rows: [], rowCount: 1 };
@@ -202,8 +261,19 @@ test("runs save, insert, updateById, and deleteById through a PostgreSQL queryab
     name: "choi",
     created_at: 3,
   });
+  assert.deepEqual(await repository.findById(1), {
+    id: 1,
+    name: "kim",
+    created_at: 3,
+  });
+  assert.equal(await repository.existsById(1), true);
+  assert.deepEqual(await repository.findAll(), [
+    { id: 1, name: "kim", created_at: 3 },
+  ]);
+  assert.equal(await repository.count(), 1);
   assert.equal(await repository.deleteById(2), 1);
   assert.equal(await repository.delete({ id: 3, name: "kim" }), 1);
+  assert.equal(await repository.deleteAll(), 1);
 
   assert.deepEqual(calls, [
     {
@@ -224,6 +294,23 @@ test("runs save, insert, updateById, and deleteById through a PostgreSQL queryab
       values: ["choi", 2],
     },
     {
+      text: 'SELECT * FROM "users" WHERE "id" = $1 LIMIT 1',
+      values: [1],
+    },
+    {
+      text:
+        'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
+      values: [1],
+    },
+    {
+      text: 'SELECT * FROM "users"',
+      values: [],
+    },
+    {
+      text: 'SELECT COUNT(*)::int AS "count" FROM "users"',
+      values: [],
+    },
+    {
       text: 'DELETE FROM "users" WHERE "id" = $1',
       values: [2],
     },
@@ -231,5 +318,33 @@ test("runs save, insert, updateById, and deleteById through a PostgreSQL queryab
       text: 'DELETE FROM "users" WHERE "id" = $1',
       values: [3],
     },
+    {
+      text: 'DELETE FROM "users"',
+      values: [],
+    },
   ]);
+});
+
+test("wraps a pg pool or client", async () => {
+  const calls = [];
+  let closed = false;
+  const driverConnection = {
+    async query(text, values) {
+      calls.push({ text, values });
+      return { rows: [{ id: 1 }], rowCount: 1 };
+    },
+    async end() {
+      closed = true;
+    },
+  };
+  const connection = new PostgresqlConnection(driverConnection);
+
+  assert.deepEqual(await connection.query("SELECT $1", [1]), {
+    rows: [{ id: 1 }],
+    rowCount: 1,
+  });
+  await connection.close();
+
+  assert.equal(closed, true);
+  assert.deepEqual(calls, [{ text: "SELECT $1", values: [1] }]);
 });

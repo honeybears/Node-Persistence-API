@@ -5,13 +5,21 @@ const {
   Column,
   Entity,
   Id,
+} = require("../dist");
+const {
+  compileMysqlCount,
+  compileMysqlDeleteAll,
   compileMysqlDeleteById,
+  compileMysqlExistsById,
+  compileMysqlFindAll,
   compileMysqlInsert,
   compileMysqlQuery,
   compileMysqlUpdate,
+  compileMysqlFindById,
   createMysqlDerivedQueryRepository,
-  parseQueryMethod,
-} = require("../dist");
+  MysqlConnection,
+} = require("../packages/mysql/dist");
+const { parseQueryMethod } = require("../dist");
 
 class Product {}
 
@@ -87,6 +95,31 @@ test("compiles insert, update, and deleteById MySQL CRUD SQL", () => {
   });
 });
 
+test("compiles JPA-style MySQL repository SQL", () => {
+  assert.deepEqual(compileMysqlFindById(1, { entity: Product }), {
+    text:
+      "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+    values: [1],
+  });
+  assert.deepEqual(compileMysqlExistsById(1, { entity: Product }), {
+    text:
+      "SELECT EXISTS(SELECT 1 FROM `shop`.`products` WHERE `product_id` = ?) AS `exists`",
+    values: [1],
+  });
+  assert.deepEqual(compileMysqlFindAll({ entity: Product }), {
+    text: "SELECT * FROM `shop`.`products`",
+    values: [],
+  });
+  assert.deepEqual(compileMysqlCount({ entity: Product }), {
+    text: "SELECT COUNT(*) AS `count` FROM `shop`.`products`",
+    values: [],
+  });
+  assert.deepEqual(compileMysqlDeleteAll({ entity: Product }), {
+    text: "DELETE FROM `shop`.`products`",
+    values: [],
+  });
+});
+
 test("runs derived queries and CRUD through a mysql2-style queryable", async () => {
   const calls = [];
   const queryable = {
@@ -113,6 +146,10 @@ test("runs derived queries and CRUD through a mysql2-style queryable", async () 
         return [[{ count: "3" }], []];
       }
 
+      if (text === "SELECT * FROM `shop`.`products`") {
+        return [[{ product_id: 10, product_name: "desk" }], []];
+      }
+
       return [[{ product_id: values[0], product_name: "desk" }], []];
     },
   };
@@ -129,10 +166,20 @@ test("runs derived queries and CRUD through a mysql2-style queryable", async () 
     product_id: 10,
     product_name: "desk",
   });
+  assert.deepEqual(await repository.findById(10), {
+    product_id: 10,
+    product_name: "desk",
+  });
+  assert.equal(await repository.existsById(10), true);
+  assert.deepEqual(await repository.findAll(), [
+    { product_id: 10, product_name: "desk" },
+  ]);
+  assert.equal(await repository.count(), 3);
   assert.equal(await repository.existsByActiveTrue(), true);
   assert.equal(await repository.countByPriceGreaterThan(100), 3);
   assert.equal(await repository.deleteByStatusIn(["hidden", "sold"]), 2);
   assert.equal(await repository.deleteById(10), 2);
+  assert.equal(await repository.deleteAll(), 2);
 
   assert.deepEqual(calls, [
     {
@@ -157,6 +204,24 @@ test("runs derived queries and CRUD through a mysql2-style queryable", async () 
     },
     {
       text:
+        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+      values: [10],
+    },
+    {
+      text:
+        "SELECT EXISTS(SELECT 1 FROM `shop`.`products` WHERE `product_id` = ?) AS `exists`",
+      values: [10],
+    },
+    {
+      text: "SELECT * FROM `shop`.`products`",
+      values: [],
+    },
+    {
+      text: "SELECT COUNT(*) AS `count` FROM `shop`.`products`",
+      values: [],
+    },
+    {
+      text:
         "SELECT EXISTS(SELECT 1 FROM `shop`.`products` WHERE (`active` IS TRUE)) AS `exists`",
       values: [],
     },
@@ -174,5 +239,41 @@ test("runs derived queries and CRUD through a mysql2-style queryable", async () 
       text: "DELETE FROM `shop`.`products` WHERE `product_id` = ?",
       values: [10],
     },
+    {
+      text: "DELETE FROM `shop`.`products`",
+      values: [],
+    },
+  ]);
+});
+
+test("wraps a mysql2-style pool or connection", async () => {
+  const calls = [];
+  let closed = false;
+  const driverConnection = {
+    async query(text, values) {
+      calls.push({ method: "query", text, values });
+      return [[{ id: 1 }], []];
+    },
+    async execute(text, values) {
+      calls.push({ method: "execute", text, values });
+      return [[{ id: 2 }], []];
+    },
+    async end() {
+      closed = true;
+    },
+  };
+  const connection = new MysqlConnection(driverConnection);
+
+  assert.deepEqual(await connection.query("SELECT ?", [1]), [[{ id: 1 }], []]);
+  assert.deepEqual(await connection.execute("SELECT ?", [2]), [
+    [{ id: 2 }],
+    [],
+  ]);
+  await connection.close();
+
+  assert.equal(closed, true);
+  assert.deepEqual(calls, [
+    { method: "query", text: "SELECT ?", values: [1] },
+    { method: "execute", text: "SELECT ?", values: [2] },
   ]);
 });

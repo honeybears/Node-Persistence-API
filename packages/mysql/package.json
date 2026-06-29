@@ -1,0 +1,26 @@
+{
+  "name": "@honeybeaers/node-persistence-api-mysql",
+  "version": "0.1.0",
+  "description": "MySQL connector for Node Persistence API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "cd ../.. && npm run build"
+  },
+  "dependencies": {
+    "@honeybeaers/node-persistence-api-core": "workspace:^",
+    "mysql2": "^3.22.5"
+  },
+  "license": "MIT"
+}

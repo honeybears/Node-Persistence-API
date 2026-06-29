@@ -3,8 +3,8 @@ import {
   QueryCondition,
   QueryOrder,
   QueryPredicatePart,
-} from "../query-method";
-import { RepositoryMethodInvocation } from "../repository";
+} from "@honeybeaers/node-persistence-api-core";
+import { RepositoryMethodInvocation } from "@honeybeaers/node-persistence-api-core";
 import {
   PostgresqlCompiledQuery,
   PostgresqlQueryCompilerOptions,

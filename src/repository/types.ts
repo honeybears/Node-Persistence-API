@@ -10,12 +10,17 @@ export interface RepositoryMethodExecutor<TResult = unknown> {
 }
 
 export interface NPARepository<TEntity extends object, TId = unknown> {
+  findById(id: TId): Promise<TEntity | null>;
+  findAll(): Promise<TEntity[]>;
+  existsById(id: TId): Promise<boolean>;
+  count(): Promise<number>;
   save(entity: TEntity): Promise<TEntity | null>;
   insert(entity: TEntity): Promise<TEntity>;
   update(entity: TEntity): Promise<TEntity | null>;
   updateById(id: TId, patch: Partial<TEntity>): Promise<TEntity | null>;
   delete(entityOrId: TEntity | TId): Promise<number>;
   deleteById(id: TId): Promise<number>;
+  deleteAll(): Promise<number>;
 }
 
 export interface NPARepositoryAdapter<TEntity extends object, TId = unknown>

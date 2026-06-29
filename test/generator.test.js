@@ -36,18 +36,25 @@ test("generates autocomplete repository interfaces and an NPA client factory", (
     entities: ["src/**/*.entity.ts"],
     out: "src/generated/npa.ts",
     adapter: "postgresql",
-    libraryImport: "@npa/test",
+    coreLibraryImport: "@npa/core",
+    adapterLibraryImport: "@npa/pg",
   });
 
   assert.equal(result.path, path.join(root, "src", "generated", "npa.ts"));
+  assert.match(result.content, /import \{ NPARepository \} from "@npa\/core";/);
+  assert.match(
+    result.content,
+    /import \{ PostgresqlQueryable, createPostgresqlDerivedQueryRepository \} from "@npa\/pg";/,
+  );
   assert.match(result.content, /interface UserRepository extends NPARepository<User, number>/);
   assert.match(result.content, /findByNameContaining\(value: NonNullable<User\["name"\]>\): Promise<User\[]>;/);
   assert.match(result.content, /deleteByNameContaining\(value: NonNullable<User\["name"\]>\): Promise<number>;/);
   assert.match(result.content, /findByAgeGreaterThan\(value: NonNullable<User\["age"\]>\): Promise<User\[]>;/);
   assert.match(result.content, /countByAgeBetween\(min: NonNullable<User\["age"\]>, max: NonNullable<User\["age"\]>\): Promise<number>;/);
   assert.match(result.content, /findByActiveTrue\(\): Promise<User\[]>;/);
+  assert.doesNotMatch(result.content, /findById\(value: NonNullable<User\["id"\]>\): Promise<User\[]>;/);
   assert.match(result.content, /user: UserRepository;/);
-  assert.match(result.content, /createPostgresqlDerivedQueryRepository<UserRepository, User, number>/);
+  assert.match(result.content, /createPostgresqlDerivedQueryRepository<UserRepository, User, number>\(\{\} as UserRepository,/);
   assert.equal(fs.readFileSync(result.path, "utf8"), result.content);
 });
 
@@ -58,16 +65,21 @@ test("generates a MySQL-backed NPA client factory", () => {
     entities: ["src/**/*.entity.ts"],
     out: "src/generated/npa.mysql.ts",
     adapter: "mysql",
-    libraryImport: "@npa/test",
+    coreLibraryImport: "@npa/core",
+    adapterLibraryImport: "@npa/mysql",
   });
 
   assert.match(
     result.content,
-    /import \{ NPARepository, MysqlQueryable, createMysqlDerivedQueryRepository \} from "@npa\/test";/,
+    /import \{ NPARepository \} from "@npa\/core";/,
+  );
+  assert.match(
+    result.content,
+    /import \{ MysqlQueryable, createMysqlDerivedQueryRepository \} from "@npa\/mysql";/,
   );
   assert.match(result.content, /mysql: \{/);
   assert.match(result.content, /queryable: MysqlQueryable;/);
-  assert.match(result.content, /createMysqlDerivedQueryRepository<UserRepository, User, number>/);
+  assert.match(result.content, /createMysqlDerivedQueryRepository<UserRepository, User, number>\(\{\} as UserRepository,/);
   assert.doesNotMatch(result.content, /createPostgresqlDerivedQueryRepository/);
 });
 

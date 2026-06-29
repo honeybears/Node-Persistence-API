@@ -10,12 +10,17 @@ export function createNPARepository<
   adapter: NPARepositoryAdapter<TEntity, TId>,
 ): TRepository & NPARepository<TEntity, TId> {
   const repository = {
+    findById: adapter.findById,
+    findAll: adapter.findAll,
+    existsById: adapter.existsById,
+    count: adapter.count,
     save: adapter.save,
     insert: adapter.insert,
     update: adapter.update,
     updateById: adapter.updateById,
     delete: adapter.delete,
     deleteById: adapter.deleteById,
+    deleteAll: adapter.deleteAll,
     ...target,
   };
 

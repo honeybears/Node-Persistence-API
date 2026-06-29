@@ -1,8 +1,5 @@
 import {
-  ParsedQueryMethod,
   QueryCondition,
-  QueryLogicalOperator,
-  QueryOperator,
   QueryOrder,
   QueryPredicatePart,
 } from "../query-method";

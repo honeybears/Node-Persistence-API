@@ -8,12 +8,14 @@ const {
   ManyToMany,
   ManyToOne,
   OneToMany,
-  compilePostgresqlInsert,
-  compilePostgresqlQuery,
-  createPostgresqlDerivedQueryRepository,
   getEntityMetadata,
   parseQueryMethod,
 } = require("../dist");
+const {
+  compilePostgresqlInsert,
+  compilePostgresqlQuery,
+  createPostgresqlDerivedQueryRepository,
+} = require("../packages/pg/dist");
 
 class Team {}
 class Role {}

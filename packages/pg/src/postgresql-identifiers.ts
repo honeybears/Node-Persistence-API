@@ -2,7 +2,7 @@ import {
   ColumnMetadata,
   EntityMetadata,
   getOptionalEntityMetadata,
-} from "../entity";
+} from "@honeybeaers/node-persistence-api-core";
 import { PostgresqlQueryCompilerOptions } from "./types";
 
 export function quoteTable(options: PostgresqlQueryCompilerOptions): string {

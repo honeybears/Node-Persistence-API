@@ -36,7 +36,9 @@ function parseGenerateOptions(
     adapter,
     entities: splitList(values.entities ?? "src/**/*.entity.ts"),
     out: values.out ?? "src/generated/npa.ts",
-    libraryImport: values.library ?? "@honeybeaers/node-persistence-api",
+    coreLibraryImport: values.coreLibrary,
+    adapterLibraryImport: values.adapterLibrary,
+    libraryImport: values.library,
   };
 }
 
@@ -86,6 +88,8 @@ Options:
   --adapter <name>       Adapter used by the generated client: postgresql or mysql.
   --entities <patterns>  Comma-separated entity source globs.
   --out <file>           Generated TypeScript output file.
-  --library <specifier>  Import specifier for the NPA package.
+  --core-library <spec>  Import specifier for the NPA core package.
+  --adapter-library <s>  Import specifier for the selected connector package.
+  --library <specifier>  Legacy import specifier used for both core and adapter.
 `);
 }

@@ -1,6 +1,10 @@
-import { NPARepositoryAdapter, RepositoryMethodExecutor } from "../repository";
+import { NPARepositoryAdapter, RepositoryMethodExecutor } from "@honeybeaers/node-persistence-api-core";
 import {
+  compileMysqlCount,
+  compileMysqlDeleteAll,
   compileMysqlDeleteById,
+  compileMysqlExistsById,
+  compileMysqlFindAll,
   compileMysqlFindById,
   compileMysqlInsert,
   compileMysqlUpdate,
@@ -39,6 +43,50 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     }
   };
 
+  findById = async (id: TId): Promise<TEntity | null> => {
+    const query = compileMysqlFindById(id, this.options);
+    const result = await executeMysqlQuery<TEntity>(
+      this.options,
+      query.text,
+      query.values,
+    );
+
+    return result.rows[0] ?? null;
+  };
+
+  findAll = async (): Promise<TEntity[]> => {
+    const query = compileMysqlFindAll(this.options);
+    const result = await executeMysqlQuery<TEntity>(
+      this.options,
+      query.text,
+      query.values,
+    );
+
+    return result.rows;
+  };
+
+  existsById = async (id: TId): Promise<boolean> => {
+    const query = compileMysqlExistsById(id, this.options);
+    const result = await executeMysqlQuery(
+      this.options,
+      query.text,
+      query.values,
+    );
+
+    return Boolean(result.rows[0]?.exists);
+  };
+
+  count = async (): Promise<number> => {
+    const query = compileMysqlCount(this.options);
+    const result = await executeMysqlQuery(
+      this.options,
+      query.text,
+      query.values,
+    );
+
+    return Number(result.rows[0]?.count ?? 0);
+  };
+
   save = async (entity: TEntity): Promise<TEntity | null> => {
     const id = getMysqlPrimaryKeyValue(entity, this.options);
     return id === null || id === undefined
@@ -59,7 +107,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       return entity;
     }
 
-    return (await this.findById(id)) ?? entity;
+    return (await this.findById(id as TId)) ?? entity;
   };
 
   update = async (entity: TEntity): Promise<TEntity | null> => {
@@ -101,14 +149,10 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return result.affectedRows ?? 0;
   };
 
-  private findById = async (id: unknown): Promise<TEntity | null> => {
-    const query = compileMysqlFindById(id, this.options);
-    const result = await executeMysqlQuery<TEntity>(
-      this.options,
-      query.text,
-      query.values,
-    );
+  deleteAll = async (): Promise<number> => {
+    const query = compileMysqlDeleteAll(this.options);
+    const result = await executeMysqlQuery(this.options, query.text, query.values);
 
-    return result.rows[0] ?? null;
+    return result.affectedRows ?? 0;
   };
 }

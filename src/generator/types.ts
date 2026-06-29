@@ -5,7 +5,9 @@ export interface GenerateNPAClientOptions {
   entities: string[];
   out: string;
   adapter: NPAAdapterName;
-  libraryImport: string;
+  coreLibraryImport?: string;
+  adapterLibraryImport?: string;
+  libraryImport?: string;
 }
 
 export interface ParsedEntitySource {

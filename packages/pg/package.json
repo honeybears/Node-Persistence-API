@@ -1,0 +1,26 @@
+{
+  "name": "@honeybeaers/node-persistence-api-pg",
+  "version": "0.1.0",
+  "description": "PostgreSQL connector for Node Persistence API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "cd ../.. && npm run build"
+  },
+  "dependencies": {
+    "@honeybeaers/node-persistence-api-core": "workspace:^",
+    "pg": "^8.22.0"
+  },
+  "license": "MIT"
+}
