@@ -1,25 +1,14 @@
 import { runDbCommand, runMigrateCommand } from "../migration/cli";
-import { generateNPAClient, generateNPARepositories } from "./generate-client";
-import {
-  GenerateNPAClientOptions,
-  GenerateNPARepositoriesOptions,
-  NPAAdapterName,
-} from "./types";
-
-type ParsedGenerateCommand =
-  | { kind: "client"; options: GenerateNPAClientOptions }
-  | { kind: "repositories"; options: GenerateNPARepositoriesOptions };
+import { generateNPAClient } from "./generate-client";
+import { GenerateNPAClientOptions, NPAAdapterName } from "./types";
 
 export async function runNPACli(argv: string[], cwd = process.cwd()): Promise<number> {
   const [command, ...args] = argv;
 
   try {
     if (command === "generate") {
-      const parsed = parseGenerateCommand(args, cwd);
-      const result =
-        parsed.kind === "repositories"
-          ? generateNPARepositories(parsed.options)
-          : generateNPAClient(parsed.options);
+      const options = parseGenerateOptions(args, cwd);
+      const result = generateNPAClient(options);
       process.stdout.write(`Generated ${result.path}\n`);
       return 0;
     }
@@ -42,29 +31,11 @@ export async function runNPACli(argv: string[], cwd = process.cwd()): Promise<nu
   }
 }
 
-function parseGenerateCommand(
+function parseGenerateOptions(
   args: string[],
   cwd: string,
-): ParsedGenerateCommand {
-  const [target, ...rest] = args;
-  const hasTarget = target === "client" || target === "repositories";
-  const kind = hasTarget ? target : "client";
-
-  if (target && !hasTarget && !target.startsWith("--")) {
-    throw new Error(`Unsupported generate target "${target}". Use client or repositories.`);
-  }
-
-  const values = parseFlags(hasTarget ? rest : args);
-
-  return kind === "repositories"
-    ? { kind, options: parseGenerateRepositoriesOptions(values, cwd) }
-    : { kind, options: parseGenerateClientOptions(values, cwd) };
-}
-
-function parseGenerateClientOptions(
-  values: Record<string, string>,
-  cwd: string,
 ): GenerateNPAClientOptions {
+  const values = parseFlags(args);
   const adapter = (values.adapter ?? "postgresql") as NPAAdapterName;
 
   if (adapter !== "postgresql" && adapter !== "mysql") {
@@ -78,19 +49,6 @@ function parseGenerateClientOptions(
     out: values.out ?? "src/generated/npa.ts",
     coreLibraryImport: values.coreLibrary,
     adapterLibraryImport: values.adapterLibrary,
-    libraryImport: values.library,
-  };
-}
-
-function parseGenerateRepositoriesOptions(
-  values: Record<string, string>,
-  cwd: string,
-): GenerateNPARepositoriesOptions {
-  return {
-    cwd,
-    entities: splitList(values.entities ?? "src/**/*.entity.ts"),
-    out: values.out ?? "src/generated/repositories.ts",
-    coreLibraryImport: values.coreLibrary,
     libraryImport: values.library,
   };
 }
@@ -135,14 +93,13 @@ function toCamelCase(value: string): string {
 
 function printHelp(): void {
   process.stdout.write(`Usage:
-  npa generate [client] [--entities "src/**/*.entity.ts"] [--out src/generated/npa.ts]
-  npa generate repositories [--entities "src/**/*.entity.ts"] [--out src/generated/repositories.ts]
+  npa generate [--entities "src/**/*.entity.ts"] [--out src/generated/npa.ts]
   npa db push [--config npa.config.mjs] [--dry-run]
   npa migrate dev [--name init] [--config npa.config.mjs]
   npa migrate deploy [--config npa.config.mjs]
 
 Options:
-  --adapter <name>       Adapter used by generated client output: postgresql or mysql.
+  --adapter <name>       Adapter used by the generated client: postgresql or mysql.
   --entities <patterns>  Comma-separated entity source globs.
   --out <file>           Generated TypeScript output file.
   --core-library <spec>  Import specifier for the NPA core package.
