@@ -4,4 +4,5 @@ export * from "./postgresql-crud-compiler";
 export * from "./postgresql-query-compiler";
 export * from "./postgresql-migration";
 export * from "./postgresql-repository-executor";
+export * from "./postgresql-transaction-manager";
 export * from "./types";

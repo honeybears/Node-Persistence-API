@@ -11,10 +11,12 @@ const {
 } = require("../../dist");
 const {
   PostgresqlConnection,
+  PostgresqlTransactionManager,
   createPostgresqlDerivedQueryRepository,
 } = require("../../packages/pg/dist");
 const {
   MysqlConnection,
+  MysqlTransactionManager,
   createMysqlDerivedQueryRepository,
 } = require("../../packages/mysql/dist");
 
@@ -33,6 +35,16 @@ const databaseAdapters = [
       new PostgresqlConnection(
         new Pool({ connectionString: container.getConnectionUri() }),
       ),
+    createTransactionRuntime: (container) => {
+      const pool = new Pool({ connectionString: container.getConnectionUri() });
+      const manager = new PostgresqlTransactionManager(pool);
+
+      return {
+        manager,
+        queryable: manager.queryable,
+        close: () => pool.end(),
+      };
+    },
     closeQueryable: (connection) => connection.close(),
     executeSql: (connection, sql) => connection.query(sql),
     createTableSql: (table) => `
@@ -62,6 +74,8 @@ const databaseAdapters = [
     quoteIdentifier: quoteMysqlIdentifier,
     createQueryable: (container) =>
       createMysqlConnection(container.getConnectionUri()),
+    createTransactionRuntime: (container) =>
+      createMysqlTransactionRuntime(container.getConnectionUri()),
     closeQueryable: (connection) => connection.close(),
     executeSql: (connection, sql) => connection.query(sql),
     createTableSql: (table) => `
@@ -111,6 +125,7 @@ async function runDatabaseFlow(t, adapter, flow) {
 
   await flow({
     adapter,
+    container,
     queryable,
     tableName,
   });
@@ -257,6 +272,40 @@ async function createMysqlConnection(connectionUri) {
   throw lastError;
 }
 
+async function createMysqlTransactionRuntime(connectionUri) {
+  const pool = mysql.createPool(connectionUri);
+  const manager = new MysqlTransactionManager(pool);
+
+  try {
+    await waitForMysqlPool(manager);
+
+    return {
+      manager,
+      queryable: manager.queryable,
+      close: () => pool.end(),
+    };
+  } catch (error) {
+    await pool.end().catch(() => {});
+    throw error;
+  }
+}
+
+async function waitForMysqlPool(manager) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      await manager.queryable.query("SELECT 1");
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(500);
+    }
+  }
+
+  throw lastError;
+}
+
 function isMissingContainerRuntimeError(error) {
   return (
     error instanceof Error &&
@@ -299,4 +348,6 @@ module.exports = {
   createProductEntity,
   databaseAdapters,
   runDatabaseFlow,
+  startContainerOrSkip,
+  uniqueTableName,
 };

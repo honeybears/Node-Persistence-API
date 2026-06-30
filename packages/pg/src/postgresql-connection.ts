@@ -10,6 +10,7 @@ export interface PostgresqlDriverConnection {
   ): Promise<PostgresqlQueryResult<TRow>> | PostgresqlQueryResult<TRow>;
   end?(): Promise<void> | void;
   release?(): void;
+  connect?(): Promise<PostgresqlDriverConnection>;
 }
 
 export class PostgresqlConnection implements PostgresqlQueryable {

@@ -13,6 +13,8 @@ export interface MysqlDriverConnection {
     values?: unknown[],
   ): Promise<MysqlRawQueryResult<TRow>> | MysqlRawQueryResult<TRow>;
   end?(): Promise<void> | void;
+  release?(): void;
+  getConnection?(): Promise<MysqlDriverConnection>;
 }
 
 export class MysqlConnection implements MysqlQueryable {
