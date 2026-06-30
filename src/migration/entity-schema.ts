@@ -464,6 +464,14 @@ function parseDecoratorOptions(
       continue;
     }
 
+    if (key === "onDelete" || key === "onUpdate") {
+      options[key] = readReferentialActionOption(
+        rawPropertyValue,
+        `${context}.${key}`,
+      );
+      continue;
+    }
+
     if (!isStringLiteral(rawPropertyValue)) {
       throw new Error(`${context}.${key} must be a string literal.`);
     }
@@ -484,14 +492,49 @@ function parseDecoratorOptions(
       options.mappedBy = stringValue;
     } else if (key === "foreignKeyName") {
       options.foreignKeyName = stringValue;
-    } else if (key === "onDelete") {
-      options.onDelete = readReferentialAction(stringValue, `${context}.${key}`);
-    } else if (key === "onUpdate") {
-      options.onUpdate = readReferentialAction(stringValue, `${context}.${key}`);
     }
   }
 
   return options;
+}
+
+function readReferentialActionOption(
+  rawValue: string,
+  context: string,
+): NPAMigrationReferentialAction {
+  if (isStringLiteral(rawValue)) {
+    return readReferentialAction(readStringLiteral(rawValue, context), context);
+  }
+
+  const enumMatch = /^(?:ReferentialAction|NPAMigrationReferentialAction)\.(CASCADE|SET_NULL|RESTRICT|NO_ACTION)$/.exec(
+    rawValue,
+  );
+
+  if (enumMatch) {
+    return readReferentialActionEnumMember(enumMatch[1], context);
+  }
+
+  throw new Error(
+    `${context} must be a string literal or ReferentialAction enum member.`,
+  );
+}
+
+function readReferentialActionEnumMember(
+  memberName: string,
+  context: string,
+): NPAMigrationReferentialAction {
+  switch (memberName) {
+    case "CASCADE":
+      return NPAMigrationReferentialAction.CASCADE;
+    case "SET_NULL":
+      return NPAMigrationReferentialAction.SET_NULL;
+    case "RESTRICT":
+      return NPAMigrationReferentialAction.RESTRICT;
+    case "NO_ACTION":
+      return NPAMigrationReferentialAction.NO_ACTION;
+    default:
+      throw new Error(`${context} must be CASCADE, SET_NULL, RESTRICT, or NO_ACTION.`);
+  }
 }
 
 function readReferentialAction(

@@ -338,7 +338,7 @@ function makeMigrationFixture() {
   fs.writeFileSync(
     path.join(src, "product.entity.ts"),
     `
-import { Column, Entity, Id, Index, ManyToMany, ManyToOne, Unique, Version } from "@npa/test";
+import { Column, Entity, Id, Index, ManyToMany, ManyToOne, ReferentialAction, Unique, Version } from "@npa/test";
 
 @Index({ name: "idx_products_active_created_at", columns: ["active", "createdAt"] })
 @Entity({ name: "products", schema: "shop" })
@@ -362,7 +362,7 @@ export class Product {
   @Version({ name: "lock_version" })
   version!: number;
 
-  @ManyToOne(() => Category, { joinColumn: "primary_category_id", foreignKeyName: "fk_products_primary_category", onDelete: "SET NULL" })
+  @ManyToOne(() => Category, { joinColumn: "primary_category_id", foreignKeyName: "fk_products_primary_category", onDelete: ReferentialAction.SET_NULL })
   primaryCategory?: Category;
 
   @ManyToMany(() => Category, { joinTable: "product_categories" })
