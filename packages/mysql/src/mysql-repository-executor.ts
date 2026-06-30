@@ -1,4 +1,4 @@
-import { NPARepositoryAdapter, RepositoryMethodExecutor } from "@honeybeaers/node-persistence-api-core";
+import { NPARepositoryAdapter, RepositoryMethodExecutor } from "@honeybeaers/npa";
 import {
   compileMysqlCount,
   compileMysqlDeleteAll,

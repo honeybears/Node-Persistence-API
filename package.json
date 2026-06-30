@@ -1,5 +1,5 @@
 {
-  "name": "@honeybeaers/node-persistence-api-core",
+  "name": "@honeybeaers/npa",
   "version": "0.1.0",
   "description": "Core Node and TypeScript persistence API with generated repository clients",
   "main": "dist/index.js",
@@ -25,9 +25,10 @@
     "build": "tsc -p tsconfig.json && tsc -p packages/pg/tsconfig.json && tsc -p packages/mysql/tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "npm run clean && npm run build && node --test test/*.test.js",
+    "test": "npm run clean && npm run build && node --test test/*.test.js packages/*/test/*.test.js",
     "test:e2e": "npm run clean && npm run build && node --test test/e2e/*.test.js",
-    "prepack": "npm run clean && npm run build"
+    "prepack": "npm run clean && npm run build",
+    "test:packages": "npm run clean && npm run build && node --test packages/*/test/*.test.js"
   },
   "keywords": [
     "node",

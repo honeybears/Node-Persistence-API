@@ -100,7 +100,7 @@ function makeCliE2EProject(tableName) {
           rootDir: "src",
           baseUrl: ".",
           paths: {
-            "@honeybeaers/node-persistence-api-core": [coreLibraryImport()],
+            "@honeybeaers/npa": [coreLibraryImport()],
           },
           skipLibCheck: true,
           strict: true,

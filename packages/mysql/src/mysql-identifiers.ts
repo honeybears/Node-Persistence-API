@@ -2,7 +2,7 @@ import {
   ColumnMetadata,
   EntityMetadata,
   getOptionalEntityMetadata,
-} from "@honeybeaers/node-persistence-api-core";
+} from "@honeybeaers/npa";
 import { MysqlQueryCompilerOptions } from "./types";
 
 export function quoteMysqlTable(options: MysqlQueryCompilerOptions): string {

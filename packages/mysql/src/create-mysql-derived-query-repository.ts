@@ -1,4 +1,4 @@
-import { createNPARepository, NPARepository } from "@honeybeaers/node-persistence-api-core";
+import { createNPARepository, NPARepository } from "@honeybeaers/npa";
 import { MysqlRepositoryExecutor } from "./mysql-repository-executor";
 import { MysqlRepositoryOptions } from "./types";
 

@@ -1,4 +1,4 @@
-import { EntityTarget } from "@honeybeaers/node-persistence-api-core";
+import { EntityTarget } from "@honeybeaers/npa";
 
 export interface PostgresqlQueryResult<TRow = Record<string, unknown>> {
   rows: TRow[];

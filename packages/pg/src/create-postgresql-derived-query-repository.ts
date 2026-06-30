@@ -1,4 +1,4 @@
-import { createNPARepository, NPARepository } from "@honeybeaers/node-persistence-api-core";
+import { createNPARepository, NPARepository } from "@honeybeaers/npa";
 import { PostgresqlRepositoryExecutor } from "./postgresql-repository-executor";
 import { PostgresqlRepositoryOptions } from "./types";
 

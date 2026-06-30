@@ -11,9 +11,9 @@ const FIND_ACTIONS = [
   { prefix: "deleteBy", result: "Promise<number>" },
 ];
 
-const CORE_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-core";
-const POSTGRESQL_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-pg";
-const MYSQL_LIBRARY_IMPORT = "@honeybeaers/node-persistence-api-mysql";
+const CORE_LIBRARY_IMPORT = "@honeybeaers/npa";
+const POSTGRESQL_LIBRARY_IMPORT = "@honeybeaers/npa-pg";
+const MYSQL_LIBRARY_IMPORT = "@honeybeaers/npa-mysql";
 
 export function generateNPAClient(
   options: GenerateNPAClientOptions,

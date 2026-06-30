@@ -41,7 +41,7 @@ importers:
 
   packages/mysql:
     dependencies:
-      '@honeybeaers/node-persistence-api-core':
+      '@honeybeaers/npa':
         specifier: workspace:^
         version: link:../..
       mysql2:
@@ -50,7 +50,7 @@ importers:
 
   packages/pg:
     dependencies:
-      '@honeybeaers/node-persistence-api-core':
+      '@honeybeaers/npa':
         specifier: workspace:^
         version: link:../..
       pg:
