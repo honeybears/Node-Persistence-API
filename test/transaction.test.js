@@ -7,6 +7,7 @@ const {
   Entity,
   getCurrentPersistenceContext,
   Id,
+  RollbackOnlyError,
   Transaction,
 } = require("../dist");
 
@@ -159,6 +160,61 @@ test("joins an existing required transaction and starts requires_new separately"
     "acquire:2",
     "begin:2:none",
     "commit:2",
+    "release:2",
+    "commit:1",
+    "release:1",
+  ]);
+});
+
+test("marks joined required transactions rollback-only after an inner failure", async () => {
+  const manager = new RecordingTransactionManager();
+
+  await assert.rejects(
+    () =>
+      manager.transactional(async () => {
+        await assert.rejects(
+          () =>
+            manager.transactional(async () => {
+              throw new Error("inner failure");
+            }),
+          /inner failure/,
+        );
+
+        return "outer recovered";
+      }),
+    RollbackOnlyError,
+  );
+
+  assert.deepEqual(manager.calls, [
+    "acquire:1",
+    "begin:1:none",
+    "rollback:1",
+    "release:1",
+  ]);
+});
+
+test("keeps outer transactions committable when a requires_new transaction fails", async () => {
+  const manager = new RecordingTransactionManager();
+
+  await manager.transactional(async () => {
+    await assert.rejects(
+      () =>
+        manager.transactional(
+          async () => {
+            throw new Error("inner failure");
+          },
+          { propagation: "requires_new" },
+        ),
+      /inner failure/,
+    );
+  });
+
+  assert.deepEqual(manager.calls, [
+    "acquire:1",
+    "begin:1:none",
+    "acquire:2",
+    "begin:2:none",
+    "rollback:2",
     "release:2",
     "commit:1",
     "release:1",

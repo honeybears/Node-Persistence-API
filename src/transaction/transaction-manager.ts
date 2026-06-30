@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PersistenceContext, runWithPersistenceContext } from "../persistence";
+import { RollbackOnlyError } from "./rollback-only-error";
 import {
   NPATransactionManager,
   NPATransactionOptions,
@@ -8,6 +9,7 @@ import {
 
 interface TransactionContext<TResource> {
   resource: TResource;
+  rollbackOnly: boolean;
 }
 
 export abstract class AbstractTransactionManager<TResource>
@@ -22,8 +24,15 @@ export abstract class AbstractTransactionManager<TResource>
     const propagation = options.propagation ?? "required";
     this.assertSupportedPropagation(propagation);
 
-    if (propagation === "required" && this.storage.getStore()) {
-      return work();
+    const currentContext = this.storage.getStore();
+
+    if (propagation === "required" && currentContext) {
+      try {
+        return await Promise.resolve(work());
+      } catch (error) {
+        currentContext.rollbackOnly = true;
+        throw error;
+      }
     }
 
     const resource = await this.acquireTransactionResource(options);
@@ -35,9 +44,18 @@ export abstract class AbstractTransactionManager<TResource>
       began = true;
 
       const persistenceContext = new PersistenceContext();
-      const result = await this.storage.run({ resource }, () =>
+      const transactionContext: TransactionContext<TResource> = {
+        resource,
+        rollbackOnly: false,
+      };
+      const result = await this.storage.run(transactionContext, () =>
         runWithPersistenceContext(persistenceContext, async () => {
           const value = await work();
+
+          if (transactionContext.rollbackOnly) {
+            throw new RollbackOnlyError();
+          }
+
           await persistenceContext.flush();
           return value;
         }),
