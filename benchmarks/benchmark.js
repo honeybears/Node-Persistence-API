@@ -150,13 +150,6 @@ async function addLivePostgresqlSuites(suites, skipped, options) {
     return;
   }
 
-  const url = options.pgUrl ?? process.env.NPA_BENCH_PG_URL ?? process.env.DATABASE_URL;
-
-  if (!url) {
-    skipped.push({ name: "npa-pg live query", reason: "Set NPA_BENCH_PG_URL or DATABASE_URL." });
-    return;
-  }
-
   let Client;
   try {
     ({ Client } = require("pg"));
@@ -165,13 +158,27 @@ async function addLivePostgresqlSuites(suites, skipped, options) {
     return;
   }
 
+  const target = await resolvePostgresqlLiveTarget(skipped, options);
+
+  if (!target) {
+    return;
+  }
+
   const npaPg = require("../packages/pg/dist");
-  const client = new Client({ connectionString: url });
-  await client.connect();
-  await client.query("CREATE TEMP TABLE npa_bench_users (id SERIAL PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, age INTEGER NOT NULL)");
-  await client.query(
-    "INSERT INTO npa_bench_users (email, name, age) SELECT 'user' || g || '@example.com', 'kim ' || g, 20 + (g % 50) FROM generate_series(1, 100) AS g",
-  );
+  const client = new Client({ connectionString: target.url });
+
+  try {
+    await client.connect();
+    await client.query("CREATE TEMP TABLE npa_bench_users (id SERIAL PRIMARY KEY, email TEXT NOT NULL, name TEXT NOT NULL, age INTEGER NOT NULL)");
+    await client.query(
+      "INSERT INTO npa_bench_users (email, name, age) SELECT 'user' || g || '@example.com', 'kim ' || g, 20 + (g % 50) FROM generate_series(1, 100) AS g",
+    );
+  } catch (error) {
+    await client.end().catch(() => {});
+    await target.cleanup?.().catch(() => {});
+    throw error;
+  }
+
   const repository = npaPg.createPostgresqlDerivedQueryRepository({}, {
     queryable: client,
     tableName: "npa_bench_users",
@@ -187,19 +194,13 @@ async function addLivePostgresqlSuites(suites, skipped, options) {
     },
     async cleanup() {
       await client.end();
+      await target.cleanup?.();
     },
   });
 }
 
 async function addLiveMysqlSuites(suites, skipped, options) {
   if (!options.live || !options.include.has("mysql")) {
-    return;
-  }
-
-  const url = options.mysqlUrl ?? process.env.NPA_BENCH_MYSQL_URL;
-
-  if (!url) {
-    skipped.push({ name: "npa-mysql live query", reason: "Set NPA_BENCH_MYSQL_URL." });
     return;
   }
 
@@ -211,18 +212,32 @@ async function addLiveMysqlSuites(suites, skipped, options) {
     return;
   }
 
+  const target = await resolveMysqlLiveTarget(skipped, options);
+
+  if (!target) {
+    return;
+  }
+
   const npaMysql = require("../packages/mysql/dist");
-  const connection = await mysql.createConnection(url);
-  await connection.query("CREATE TEMPORARY TABLE npa_bench_users (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, age INT NOT NULL)");
-  const rows = Array.from({ length: 100 }, (_, index) => [
-    `user${index + 1}@example.com`,
-    `kim ${index + 1}`,
-    20 + (index % 50),
-  ]);
-  await connection.query(
-    "INSERT INTO npa_bench_users (email, name, age) VALUES ?",
-    [rows],
-  );
+  const connection = await createMysqlConnection(target.url, mysql);
+
+  try {
+    await connection.query("CREATE TEMPORARY TABLE npa_bench_users (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255) NOT NULL, name VARCHAR(255) NOT NULL, age INT NOT NULL)");
+    const rows = Array.from({ length: 100 }, (_, index) => [
+      `user${index + 1}@example.com`,
+      `kim ${index + 1}`,
+      20 + (index % 50),
+    ]);
+    await connection.query(
+      "INSERT INTO npa_bench_users (email, name, age) VALUES ?",
+      [rows],
+    );
+  } catch (error) {
+    await connection.end().catch(() => {});
+    await target.cleanup?.().catch(() => {});
+    throw error;
+  }
+
   const repository = npaMysql.createMysqlDerivedQueryRepository({}, {
     queryable: connection,
     tableName: "npa_bench_users",
@@ -238,8 +253,111 @@ async function addLiveMysqlSuites(suites, skipped, options) {
     },
     async cleanup() {
       await connection.end();
+      await target.cleanup?.();
     },
   });
+}
+
+async function resolvePostgresqlLiveTarget(skipped, options) {
+  const url = options.pgUrl ?? process.env.NPA_BENCH_PG_URL ?? process.env.DATABASE_URL;
+
+  if (url) {
+    return { url };
+  }
+
+  let PostgreSqlContainer;
+  try {
+    ({ PostgreSqlContainer } = require("@testcontainers/postgresql"));
+  } catch (error) {
+    skipped.push({ name: "npa-pg live query", reason: `@testcontainers/postgresql is unavailable: ${error.message}` });
+    return null;
+  }
+
+  const image = process.env.NPA_BENCH_POSTGRESQL_IMAGE
+    ?? process.env.NPA_E2E_POSTGRESQL_IMAGE
+    ?? "postgres:16-alpine";
+
+  try {
+    const container = await new PostgreSqlContainer(image).start();
+    return {
+      url: container.getConnectionUri(),
+      cleanup: () => container.stop(),
+    };
+  } catch (error) {
+    if (isMissingContainerRuntimeError(error)) {
+      skipped.push({ name: "npa-pg live query", reason: "No Docker/container runtime is available for Testcontainers." });
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function resolveMysqlLiveTarget(skipped, options) {
+  const url = options.mysqlUrl ?? process.env.NPA_BENCH_MYSQL_URL;
+
+  if (url) {
+    return { url };
+  }
+
+  let MySqlContainer;
+  try {
+    ({ MySqlContainer } = require("@testcontainers/mysql"));
+  } catch (error) {
+    skipped.push({ name: "npa-mysql live query", reason: `@testcontainers/mysql is unavailable: ${error.message}` });
+    return null;
+  }
+
+  const image = process.env.NPA_BENCH_MYSQL_IMAGE
+    ?? process.env.NPA_E2E_MYSQL_IMAGE
+    ?? "mysql:8.0";
+
+  try {
+    const container = await new MySqlContainer(image).start();
+    return {
+      url: container.getConnectionUri(),
+      cleanup: () => container.stop(),
+    };
+  } catch (error) {
+    if (isMissingContainerRuntimeError(error)) {
+      skipped.push({ name: "npa-mysql live query", reason: "No Docker/container runtime is available for Testcontainers." });
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function createMysqlConnection(url, mysql) {
+  let lastError;
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    let connection;
+
+    try {
+      connection = await mysql.createConnection(url);
+      await connection.query("SELECT 1");
+      return connection;
+    } catch (error) {
+      lastError = error;
+
+      if (connection) {
+        await connection.end().catch(() => {});
+      }
+
+      await delay(500);
+    }
+  }
+
+  throw lastError;
+}
+
+function isMissingContainerRuntimeError(error) {
+  return error instanceof Error && /container runtime|docker/i.test(error.message);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function addOptionalOrmComparisonNotes(skipped, options) {
@@ -336,7 +454,7 @@ function printReport(results, skipped, options) {
   console.log("");
 
   const rows = [
-    ["Benchmark", "Group", "Iterations", "Total ms", "Ops/s", "Avg us", "P50 us", "P95 us", "P99 us"],
+    ["Benchmark", "Group", "Iterations", "Total ms", "Ops/s (TPS)", "Avg us", "P50 us", "P95 us", "P99 us"],
     ...results.map((result) => [
       result.name,
       result.group,
@@ -439,7 +557,7 @@ function positiveInteger(arg, name) {
 }
 
 function printHelp() {
-  console.log(`Usage: node benchmarks/benchmark.js [options]\n\nOptions:\n  --iterations=N        Non-DB iterations. Default: ${DEFAULT_ITERATIONS}\n  --warmup=N            Non-DB warmup iterations. Default: ${DEFAULT_WARMUP}\n  --live                Include live DB benchmarks when URLs are provided.\n  --live-iterations=N   Live DB iterations. Default: ${DEFAULT_LIVE_ITERATIONS}\n  --live-warmup=N       Live DB warmup iterations. Default: ${DEFAULT_LIVE_WARMUP}\n  --include=a,b         Include lanes: npa,postgresql,mysql,prisma,typeorm.\n  --pg-url=URL          PostgreSQL URL. Defaults to NPA_BENCH_PG_URL or DATABASE_URL.\n  --mysql-url=URL       MySQL URL. Defaults to NPA_BENCH_MYSQL_URL.\n  --json                Print machine-readable JSON.\n`);
+  console.log(`Usage: node benchmarks/benchmark.js [options]\n\nOptions:\n  --iterations=N        Non-DB iterations. Default: ${DEFAULT_ITERATIONS}\n  --warmup=N            Non-DB warmup iterations. Default: ${DEFAULT_WARMUP}\n  --live                Include live DB benchmarks. Starts Testcontainers when URLs are not provided.\n  --live-iterations=N   Live DB iterations. Default: ${DEFAULT_LIVE_ITERATIONS}\n  --live-warmup=N       Live DB warmup iterations. Default: ${DEFAULT_LIVE_WARMUP}\n  --include=a,b         Include lanes: npa,postgresql,mysql,prisma,typeorm.\n  --pg-url=URL          PostgreSQL URL. Defaults to NPA_BENCH_PG_URL, DATABASE_URL, or Testcontainers.\n  --mysql-url=URL       MySQL URL. Defaults to NPA_BENCH_MYSQL_URL or Testcontainers.\n  --json                Print machine-readable JSON.\n`);
 }
 
 function formatNumber(value) {

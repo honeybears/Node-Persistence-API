@@ -20,7 +20,13 @@ Print JSON for regression tracking:
 pnpm bench -- --json > benchmark-result.json
 ```
 
-Run live database benchmarks only when you explicitly provide URLs:
+Run live database benchmarks with Testcontainers:
+
+```bash
+pnpm bench -- --live
+```
+
+When `--live` is used, the harness starts PostgreSQL and MySQL containers unless URLs are provided. Use explicit URLs to benchmark an existing database instead:
 
 ```bash
 NPA_BENCH_PG_URL=postgres://user:pass@localhost:5432/db \
@@ -28,7 +34,7 @@ NPA_BENCH_MYSQL_URL=mysql://user:pass@localhost:3306/db \
 pnpm bench -- --live
 ```
 
-Live benchmarks create temporary `npa_bench_users` tables on a single connection and run `findOneByEmail` through the NPA repository adapter. They measure driver round trips too, so compare them separately from the no-DB microbenchmarks.
+Live benchmarks create temporary `npa_bench_users` tables on a single connection and run `findOneByEmail` through the NPA repository adapter. `Ops/s` is the measured TPS for the live query lane. Override images with `NPA_BENCH_POSTGRESQL_IMAGE` and `NPA_BENCH_MYSQL_IMAGE`.
 
 ## Comparing With Prisma or TypeORM
 

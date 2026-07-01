@@ -418,15 +418,17 @@ pnpm bench -- --iterations=1000 --warmup=100
 pnpm bench:json
 ```
 
-Live PostgreSQL/MySQL benchmarks are opt-in because they measure driver and network round trips too:
+Live PostgreSQL/MySQL benchmarks are opt-in because they measure driver and database round trips too. `pnpm bench:live` starts Testcontainers by default; provide URLs to benchmark existing databases instead:
 
 ```bash
+pnpm bench:live
+
 NPA_BENCH_PG_URL=postgres://user:pass@localhost:5432/db \
 NPA_BENCH_MYSQL_URL=mysql://user:pass@localhost:3306/db \
 pnpm bench:live
 ```
 
-Use `--include=npa,postgresql,mysql,prisma,typeorm` to choose lanes. Prisma and TypeORM are reported as skipped until a dedicated comparison fixture provides their generated client/data source.
+Use `--include=npa,postgresql,mysql,prisma,typeorm` to choose lanes. `Ops/s` is TPS for live query lanes. Override container images with `NPA_BENCH_POSTGRESQL_IMAGE` and `NPA_BENCH_MYSQL_IMAGE`.
 
 ### E2E Database Tests
 
