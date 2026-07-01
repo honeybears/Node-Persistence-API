@@ -24,6 +24,39 @@ class UserRepository extends NPARepository {
 
 Repository(TokenUser)(UserRepository);
 
+class AutoTokenUser {}
+
+Id()(AutoTokenUser.prototype, "id");
+Column()(AutoTokenUser.prototype, "name");
+Entity({ name: "auto_users" })(AutoTokenUser);
+
+class AutoUserRepository extends NPARepository {}
+
+Repository(AutoTokenUser)(AutoUserRepository);
+
+test("auto-registers imported @Repository tokens when repositories are omitted", async () => {
+  const created = [];
+  const adapter = {
+    createRepository(options) {
+      created.push(options.repository);
+
+      return Object.assign(Object.create(options.repository.prototype), {
+        async findById(id) {
+          return { id };
+        },
+      });
+    },
+  };
+
+  const npa = createNPA({ adapter });
+  const users = npa.get(AutoUserRepository);
+
+  assert.equal(users instanceof AutoUserRepository, true);
+  assert.deepEqual(await users.findById(10), { id: 10 });
+  assert.equal(created.includes(UserRepository), true);
+  assert.equal(created.includes(AutoUserRepository), true);
+});
+
 test("creates repositories from @Repository abstract-class tokens", async () => {
   const created = [];
   const adapter = {
@@ -60,7 +93,7 @@ test("rejects repositories without @Repository metadata", () => {
   );
 });
 
-test("rejects repository lookups not registered in createNPA", () => {
+test("keeps explicit repository lists scoped to the provided tokens", () => {
   class OtherRepository extends NPARepository {}
   Repository(TokenUser)(OtherRepository);
 

@@ -16,7 +16,6 @@ async function main(): Promise<void> {
   const connection = await createConnection();
   const npa = createNPA({
     adapter: postgresql({ queryable: connection }),
-    repositories: [UserRepository],
   });
   const users = npa.get(UserRepository);
 

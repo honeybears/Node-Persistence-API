@@ -16,7 +16,6 @@ async function main(): Promise<void> {
   const connection = await createConnection();
   const npa = createNPA({
     adapter: mysql({ queryable: connection, preferExecute: true }),
-    repositories: [UserRepository],
   });
   const users = npa.get(UserRepository);
 

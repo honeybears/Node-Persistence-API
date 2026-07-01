@@ -1,5 +1,6 @@
 import type { EntityTarget } from "../entity";
 import {
+  getRegisteredRepositoryTargets,
   getRepositoryMetadata,
   getRepositoryTargetName,
   type NPARepositoryTarget,
@@ -27,7 +28,7 @@ export interface NPARuntimeAdapter {
 
 export interface CreateNPAOptions {
   adapter: NPARuntimeAdapter;
-  repositories: NPARepositoryTarget[];
+  repositories?: NPARepositoryTarget[];
 }
 
 export interface NPAApplication {
@@ -39,7 +40,9 @@ export interface NPAApplication {
 export function createNPA(options: CreateNPAOptions): NPAApplication {
   const repositories = new Map<NPARepositoryTarget, object>();
 
-  for (const repository of options.repositories) {
+  const repositoryTargets = options.repositories ?? getRegisteredRepositoryTargets();
+
+  for (const repository of repositoryTargets) {
     if (repositories.has(repository)) {
       throw new Error(
         `Repository ${getRepositoryTargetName(repository)} is registered more than once.`,

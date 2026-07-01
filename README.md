@@ -102,8 +102,11 @@ Application code extends only NPA, not a database-specific repository type.
 `deleteById`, and `deleteAll`.
 
 Declare repositories as abstract classes and bind them to entities with
-`@Repository`. NPA creates the concrete implementation at runtime with a
-`Proxy`, so only the methods you want autocomplete for need to be declared.
+`@Repository`. Imported decorated repositories are auto-registered when
+`createNPA({ adapter })` runs. Pass `repositories: [UserRepository]` only when
+you want to restrict an NPA instance to an explicit subset. NPA creates the
+concrete implementation at runtime with a `Proxy`, so only the methods you want
+autocomplete for need to be declared.
 
 ```ts
 import { NPARepository, Repository } from '@honeybeaers/npa';
@@ -229,7 +232,6 @@ const connection = new PostgresqlConnection(pool);
 
 const npa = createNPA({
   adapter: postgresql({ queryable: connection }),
-  repositories: [UserRepository],
 });
 
 const users = npa.get(UserRepository);
@@ -261,7 +263,6 @@ const connection = new MysqlConnection(pool);
 
 const npa = createNPA({
   adapter: npaMysql({ queryable: connection }),
-  repositories: [UserRepository],
 });
 
 const users = npa.get(UserRepository);
@@ -304,7 +305,6 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const txManager = new PostgresqlTransactionManager(pool);
 const npa = createNPA({
   adapter: postgresql({ queryable: txManager.queryable }),
-  repositories: [UserRepository],
 });
 
 class UserService {
