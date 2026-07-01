@@ -77,7 +77,7 @@ index decorators target that column; class-level decorators use property names i
 default `<property>_<targetIdColumn>` name. Use `foreignKeyName`, `onDelete`,
 and `onUpdate` to control generated constraints. `@OneToMany` requires
 `mappedBy`; `@ManyToMany` creates a join table. Entity classes must be exported
-so the generated client can import them.
+so repositories, application code, and migration tooling can reference them.
 
 ## Repository Usage
 
@@ -125,52 +125,6 @@ export abstract class UserRepository extends NPARepository<User, number> {
 Supported relation predicates include `@ManyToOne`, `@OneToMany({ mappedBy })`,
 and `@ManyToMany({ joinTable })` target columns. Deeper paths such as
 `findByTeamCompanyName` are not inferred yet.
-
-## CLI Generate
-
-Run `npa generate` when you want NPA to create a typed client file and
-single-column method variants for you. Hand-written abstract repositories remain
-the recommended path for JPA-style repository declarations.
-
-```bash
-npa generate \
-  --entities "src/**/*.entity.ts" \
-  --out src/generated/npa.ts \
-  --adapter postgresql
-```
-
-Use `--adapter mysql` to generate a MySQL-backed client factory.
-
-Generated output includes:
-
-```ts
-import { NPARepository } from '@honeybeaers/npa';
-import {
-  PostgresqlQueryable,
-  createPostgresqlDerivedQueryRepository,
-} from '@honeybeaers/npa-pg';
-
-export interface UserRepository extends NPARepository<User, number> {
-  findByName(value: NonNullable<User['name']>): Promise<User[]>;
-  findByNameContaining(value: NonNullable<User['name']>): Promise<User[]>;
-  deleteByNameContaining(value: NonNullable<User['name']>): Promise<number>;
-  countByCreatedAtBetween(
-    min: NonNullable<User['createdAt']>,
-    max: NonNullable<User['createdAt']>,
-  ): Promise<number>;
-}
-
-export interface NPAClient {
-  user: UserRepository;
-}
-```
-
-The generator creates single-field method variants for `find`, `findOne`,
-`exists`, `count`, and `delete`. Complex multi-field methods can still be
-declared manually on your repository interface. Base methods such as
-`findById`, `findAll`, and `deleteAll` come from `NPARepository`, so generated
-interfaces do not need to repeat them.
-
 
 ## Schema Push and Migrations
 
@@ -385,11 +339,9 @@ pnpm pack
 ### E2E Database Tests
 
 Real database E2E tests run separately from the unit suite and use
-Testcontainers to start PostgreSQL and MySQL automatically. The same repository
-E2E flow runs directly against each database adapter and through a CLI-generated
-client. The structure follows Prisma's scenario-oriented E2E style: a generated
-client is compiled inside a temporary project, then the public repository API is
-exercised against real providers.
+Testcontainers to start PostgreSQL and MySQL automatically. The suite exercises
+repository operations, relation-field derived queries, transactions,
+`db push`, and `migrate dev` / `migrate deploy` against real providers.
 
 ```bash
 pnpm test:e2e

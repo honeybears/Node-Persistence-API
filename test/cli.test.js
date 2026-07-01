@@ -10,54 +10,19 @@ test("prints CLI help when no command is provided", () => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Usage:/);
-  assert.match(result.stdout, /npa generate/);
+  assert.doesNotMatch(result.stdout, /npa generate/);
   assert.match(result.stdout, /npa db push/);
   assert.match(result.stdout, /npa migrate dev/);
   assert.match(result.stdout, /npa migrate deploy/);
 });
 
-test("rejects unsupported CLI adapter names", () => {
+test("rejects removed generate command", () => {
   const root = makeCliFixtureProject();
-  const result = runCli(
-    [
-      "generate",
-      "--adapter",
-      "sqlite",
-      "--entities",
-      "src/**/*.entity.ts",
-      "--out",
-      "src/generated/npa.ts",
-    ],
-    root,
-  );
+  const result = runCli(["generate", "--entities", "src/**/*.entity.ts"], root);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Unsupported adapter "sqlite"/);
-});
-
-test("generates a client from CLI inline flags", () => {
-  const root = makeCliFixtureProject();
-  const outPath = path.join(root, "src", "generated", "npa.ts");
-  const result = runCli(
-    [
-      "generate",
-      "--adapter=mysql",
-      "--entities=src/**/*.entity.ts",
-      "--out=src/generated/npa.ts",
-      "--core-library=@npa/core",
-      "--adapter-library=@npa/mysql",
-    ],
-    root,
-  );
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Generated /);
-
-  const generated = fs.readFileSync(outPath, "utf8");
-  assert.match(generated, /import \{ NPARepository \} from "@npa\/core";/);
-  assert.match(generated, /import \{ MysqlQueryable, createMysqlDerivedQueryRepository \} from "@npa\/mysql";/);
-  assert.match(generated, /export interface NPAClient/);
-  assert.match(generated, /product: ProductRepository;/);
+  assert.match(result.stdout, /Usage:/);
+  assert.doesNotMatch(result.stdout, /npa generate/);
 });
 
 test("prints migrate dry-run SQL", () => {
@@ -198,37 +163,6 @@ test("rejects unsupported migrate adapter names", () => {
   assert.match(result.stderr, /Migration adapter must be postgresql or mysql/);
 });
 
-test("generates TypeScript clients that compile for each adapter", () => {
-  for (const adapter of ["postgresql", "mysql"]) {
-    const root = makeCliFixtureProject({
-      libraryImport: coreLibraryImport(),
-    });
-    const result = runCli(
-      [
-        "generate",
-        "--adapter",
-        adapter,
-        "--entities",
-        "src/**/*.entity.ts",
-        "--out",
-        "src/generated/npa.ts",
-        "--core-library",
-        coreLibraryImport(),
-        "--adapter-library",
-        adapterLibraryImport(adapter),
-      ],
-      root,
-    );
-
-    assert.equal(result.status, 0, result.stderr);
-    compileProject(root);
-    assert.equal(
-      fs.existsSync(path.join(root, "dist", "generated", "npa.js")),
-      true,
-    );
-  }
-});
-
 function runCli(args, cwd = process.cwd()) {
   return childProcess.spawnSync(
     process.execPath,
@@ -240,8 +174,8 @@ function runCli(args, cwd = process.cwd()) {
   );
 }
 
-function makeCliFixtureProject(options = {}) {
-  const library = options.libraryImport ?? "@npa/test";
+function makeCliFixtureProject() {
+  const library = "@npa/test";
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "npa-cli-"));
   const src = path.join(root, "src");
   fs.mkdirSync(src, { recursive: true });
@@ -293,26 +227,4 @@ export class Product {
   );
 
   return root;
-}
-
-function compileProject(root) {
-  const result = childProcess.spawnSync(
-    process.execPath,
-    [require.resolve("typescript/bin/tsc"), "-p", "tsconfig.json"],
-    {
-      cwd: root,
-      encoding: "utf8",
-    },
-  );
-
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-}
-
-function coreLibraryImport() {
-  return path.resolve(__dirname, "..", "dist");
-}
-
-function adapterLibraryImport(adapter) {
-  const packageName = adapter === "mysql" ? "mysql" : "pg";
-  return path.resolve(__dirname, "..", "packages", packageName, "dist");
 }

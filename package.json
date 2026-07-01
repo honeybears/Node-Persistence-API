@@ -1,7 +1,7 @@
 {
   "name": "@honeybeaers/npa",
   "version": "0.1.0",
-  "description": "Core Node and TypeScript persistence API with generated repository clients",
+  "description": "Core Node and TypeScript persistence API with JPA-style repositories",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
