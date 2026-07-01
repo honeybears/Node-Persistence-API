@@ -1,0 +1,19 @@
+{
+  "name": "npa-orm-comparison-benchmark",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Optional Prisma and TypeORM comparison benchmark for NPA",
+  "type": "commonjs",
+  "scripts": {
+    "bench": "node compare.js",
+    "prepare:prisma": "prisma generate --schema prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.1.0",
+    "@testcontainers/postgresql": "^12.0.4",
+    "pg": "^8.22.0",
+    "prisma": "^7.1.0",
+    "typeorm": "^0.3.28",
+    "@prisma/adapter-pg": "^7.1.0"
+  }
+}

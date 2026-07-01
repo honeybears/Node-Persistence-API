@@ -388,7 +388,7 @@ async function setupPostgresqlBenchmarkTable(pool, table, seedRows) {
   await pool.query(`CREATE INDEX ${table.slice(1, -1)}_name_idx ON ${table} (name)`);
   await pool.query(
     `INSERT INTO ${table} (email, name, age)
-     SELECT 'user' || g || '@example.com', 'bench post ' || g, 20 + (g % 50)
+     SELECT 'user' || g || '@example.com', 'bench user ' || g, 20 + (g % 50)
      FROM generate_series(1, $1) AS g`,
     [seedRows],
   );
@@ -408,7 +408,7 @@ async function setupMysqlBenchmarkTable(pool, table, seedRows) {
 
   const rows = Array.from({ length: seedRows }, (_, index) => [
     `user${index + 1}@example.com`,
-    `bench post ${index + 1}`,
+    `bench user ${index + 1}`,
     20 + (index % 50),
   ]);
 
@@ -459,13 +459,13 @@ async function runLoadReport({ adapter, repository, options }) {
 }
 
 async function runReadHeavyScenario({ repository, options }) {
-  const metrics = createScenarioMetrics(["List Posts", "Get By ID"]);
+  const metrics = createScenarioMetrics(["List Users", "Get By ID"]);
   const startedAt = performance.now();
   const deadline = startedAt + options.loadDurationSeconds * 1000;
 
   await Promise.all(Array.from({ length: options.virtualUsers }, (_, vu) =>
     runUntilDeadline(deadline, async (iteration) => {
-      await recordOperation(metrics, "List Posts", () =>
+      await recordOperation(metrics, "List Users", () =>
         repository.findTop10ByNameContainingOrderByIdDesc("bench"),
       );
       await recordOperation(metrics, "Get By ID", () =>
@@ -488,7 +488,7 @@ async function runReadHeavyScenario({ repository, options }) {
 }
 
 async function runWriteAndReadScenario({ repository, options, adapter }) {
-  const metrics = createScenarioMetrics(["Create Post", "Get Post"]);
+  const metrics = createScenarioMetrics(["Create User", "Get User"]);
   const state = { sequence: 0 };
   const startedAt = performance.now();
   const deadline = startedAt + options.loadDurationSeconds * 1000;
@@ -496,24 +496,24 @@ async function runWriteAndReadScenario({ repository, options, adapter }) {
   await Promise.all(Array.from({ length: options.virtualUsers }, (_, vu) =>
     runUntilDeadline(deadline, async () => {
       const sequence = state.sequence++;
-      const created = await recordOperation(metrics, "Create Post", () =>
+      const created = await recordOperation(metrics, "Create User", () =>
         repository.insert({
           email: `write-${adapter.toLowerCase()}-${process.pid}-${vu}-${sequence}@example.com`,
-          name: `write post ${sequence}`,
+          name: `write user ${sequence}`,
           age: 20 + (sequence % 50),
         }),
       );
 
       if (created && created.id !== undefined && created.id !== null) {
-        await recordOperation(metrics, "Get Post", () => repository.findOneById(created.id));
+        await recordOperation(metrics, "Get User", () => repository.findOneById(created.id));
       }
     }),
   ));
 
   const durationSeconds = (performance.now() - startedAt) / 1000;
   const totalIterations = Math.min(
-    metrics.get("Create Post").count,
-    metrics.get("Get Post").count,
+    metrics.get("Create User").count,
+    metrics.get("Get User").count,
   );
 
   return {
@@ -814,7 +814,7 @@ function loadScenarioRows(scenarioName, reports) {
   const rows = [headers];
 
   if (scenarioName === "Read-Heavy") {
-    addMetricRows(rows, reports, "List Posts");
+    addMetricRows(rows, reports, "List Users");
     addMetricRows(rows, reports, "Get By ID");
     rows.push(["Total Reads", ...reports.map((report) => formatNumber(report.scenario.totalOperations))]);
     rows.push(["Reads/second", ...reports.map((report) => `${formatNumber(report.scenario.operationsPerSecond)}/s`)]);
@@ -822,8 +822,8 @@ function loadScenarioRows(scenarioName, reports) {
     return rows;
   }
 
-  addMetricRows(rows, reports, "Create Post");
-  addMetricRows(rows, reports, "Get Post");
+  addMetricRows(rows, reports, "Create User");
+  addMetricRows(rows, reports, "Get User");
   rows.push(["Total Iterations", ...reports.map((report) => formatNumber(report.scenario.totalOperations))]);
   rows.push(["Iterations/second", ...reports.map((report) => `${formatNumber(report.scenario.operationsPerSecond)}/s`)]);
   rows.push(["Errors", ...reports.map((report) => formatNumber(report.scenario.totalErrors))]);

@@ -39,7 +39,8 @@
     "bench:json": "pnpm build && node benchmarks/benchmark.js --json",
     "bench:live": "pnpm build && node benchmarks/benchmark.js --live",
     "package:vscode": "pnpm --filter npa-vscode package:vsix",
-    "verify:vscode-install": "pnpm --filter npa-vscode verify:install"
+    "verify:vscode-install": "pnpm --filter npa-vscode verify:install",
+    "bench:compare": "pnpm build && node benchmarks/compare/compare.js"
   },
   "keywords": [
     "node",

@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model BenchUser {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String
+  age       Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("npa_compare_users")
+}

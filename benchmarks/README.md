@@ -44,15 +44,24 @@ pnpm bench -- --live
 
 Live benchmarks create isolated `npa_bench_*` tables, seed deterministic rows, and run repository methods through a configured pool. `Ops/s` is TPS for the single-query lane; the performance report includes avg/p95 latencies, total operations, operations per second, and error counts per scenario. Override images with `NPA_BENCH_POSTGRESQL_IMAGE` and `NPA_BENCH_MYSQL_IMAGE`.
 
-## Comparing With Prisma or TypeORM
+## Comparing With Prisma and TypeORM
 
-The harness accepts optional comparison lanes:
+Use the dedicated comparison workspace when you want an apples-to-apples ORM run instead of NPA-only hot-path measurements:
 
 ```bash
-pnpm bench -- --include=npa,prisma,typeorm
+cd benchmarks/compare
+pnpm install
+pnpm prepare:prisma
+cd ../..
+pnpm bench:compare -- --duration=60 --virtual-users=50 --pool-size=10
 ```
 
-Those lanes are reported as skipped until a benchmark app provides generated Prisma Client or a TypeORM DataSource fixture. Keep those dependencies out of the core package unless a dedicated comparison workspace is added.
+The comparison runner uses one PostgreSQL schema, deterministic seed data, and the same read-heavy / write-and-read scenarios for NPA, Prisma, and TypeORM. It runs ORM lanes sequentially and starts a separate PostgreSQL Testcontainer for each ORM lane by default. To use an existing disposable database, pass `--pg-url` with `--allow-destructive` because the runner recreates `npa_compare_users` before each ORM/scenario/repeat.
+
+```bash
+pnpm bench:compare -- --orms=npa,prisma,typeorm --scenario=read-heavy
+pnpm bench:compare -- --duration=60 --virtual-users=50 --pool-size=10 --repeat=3
+```
 
 ## Reading Results
 
