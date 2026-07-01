@@ -1,0 +1,26 @@
+{
+  "name": "@honeybeaers/npa-language",
+  "version": "0.1.0",
+  "description": "Editor-independent language helpers for Node Persistence API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "cd ../.. && npm run build",
+    "test": "cd ../.. && npm run build && node --test packages/language/test/*.test.js"
+  },
+  "dependencies": {
+    "@honeybeaers/npa": "workspace:^"
+  },
+  "license": "MIT"
+}

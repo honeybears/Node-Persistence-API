@@ -327,6 +327,34 @@ and throws `OptimisticLockError` when no row matches the expected version.
    parsed into a query AST.
 4. The selected adapter compiles the AST with entity metadata and executes it.
 
+## Language Helpers
+
+`@honeybeaers/npa-language` is an editor-independent package for future VS Code
+and IDEA support. It does not execute user code or talk to a database. Feed it an
+entity schema and it returns Spring Data-style method completions and diagnostics.
+
+```ts
+import {
+  getNPAQueryMethodCompletions,
+  validateNPAQueryMethod,
+} from '@honeybeaers/npa-language';
+
+const completions = getNPAQueryMethodCompletions({
+  prefix: 'findByNa',
+  entity: userSchema,
+  workspace,
+});
+
+const result = validateNPAQueryMethod({
+  methodName: 'findByTeamNameAndAgeGreaterThan',
+  entity: userSchema,
+  workspace,
+});
+```
+
+VS Code or IDEA plugins should handle editor integration only: collect TypeScript
+entity schemas, call this package, and render completions/diagnostics.
+
 ## Develop
 
 ```bash
