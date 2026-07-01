@@ -408,56 +408,20 @@ pnpm test
 pnpm pack
 ```
 
-### Benchmarks
+### TODO
 
-Run local no-DB benchmarks for parser, duplicate predicate validation, proxy dispatch, and SQL compilation:
+The current codebase is suitable for demos, but the following items are needed
+before treating NPA as a fuller ORM:
 
-```bash
-pnpm bench
-pnpm bench -- --iterations=1000 --warmup=100
-pnpm bench:json
-```
-
-Live PostgreSQL/MySQL benchmarks are opt-in because they measure driver and database round trips too. `pnpm bench:live` starts Testcontainers by default and prints a K6-style report for read-heavy and write-and-read scenarios:
-
-```bash
-pnpm bench:live
-pnpm bench -- --live --duration=60 --virtual-users=50 --pool-size=10
-pnpm bench -- --live --scenario=read-heavy
-```
-
-Provide URLs to benchmark existing databases instead:
-
-```bash
-NPA_BENCH_PG_URL=postgres://user:pass@localhost:5432/db \
-NPA_BENCH_MYSQL_URL=mysql://user:pass@localhost:3306/db \
-pnpm bench:live
-```
-
-Use `--include=npa,postgresql,mysql,prisma,typeorm` to choose lanes. `Ops/s` is TPS for single-query live lanes; the performance report includes avg/p95 latency, total operations, throughput, and errors. Override container images with `NPA_BENCH_POSTGRESQL_IMAGE` and `NPA_BENCH_MYSQL_IMAGE`.
-
-The `--duration` value is applied per scenario and adapter. For example, `--duration=60` with PostgreSQL and MySQL plus all scenarios runs read-heavy and write-and-read for each database.
-
-Example local live result from `pnpm bench -- --live --duration=60 --virtual-users=50 --pool-size=10`:
-
-| Scenario | Metric | PostgreSQL | MySQL |
-| --- | --- | ---: | ---: |
-| Single Query | findOneByEmail TPS | 3,150.97/s | 2,656.43/s |
-| Read-Heavy | List Posts avg | 3.44ms | 3.87ms |
-| Read-Heavy | List Posts p95 | 5.373ms | 6.346ms |
-| Read-Heavy | Get By ID avg | 3.394ms | 3.86ms |
-| Read-Heavy | Get By ID p95 | 5.297ms | 6.346ms |
-| Read-Heavy | Total reads | 877,880 | 776,032 |
-| Read-Heavy | Reads/second | 14,630.31/s | 12,932.8/s |
-| Write-and-Read | Create Post avg | 3.836ms | 14.076ms |
-| Write-and-Read | Create Post p95 | 6.336ms | 23.507ms |
-| Write-and-Read | Get Post avg | 3.395ms | 5.87ms |
-| Write-and-Read | Get Post p95 | 5.587ms | 10.014ms |
-| Write-and-Read | Total iterations | 414,844 | 150,409 |
-| Write-and-Read | Iterations/second | 6,913.65/s | 2,506.4/s |
-| All | Errors | 0 | 0 |
-
-These numbers are machine-dependent; use the same machine, Node version, container images, pool size, virtual users, and duration when comparing changes.
+- Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
+- Query API: add pagination, runtime sort, projection/select clauses, aggregate/groupBy support, bulk update by condition, and an escape hatch such as custom SQL or @Query.
+- Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
+- Relations: support deeper relation paths, cascade persist/remove, orphan removal, eager/lazy fetch strategies, and safer relation mutation helpers.
+- Entity mapping: add composite keys, default values, enum/json/array types, UUID/sequence generation, embedded value objects, column transformers, inheritance, and lifecycle hooks.
+- Migrations: add rename detection, down migrations, destructive-change guards, drift detection, data migration hooks, and richer DDL for defaults/generated columns/enums.
+- Transactions: add savepoint-backed nested transactions, more propagation modes, and stricter read-only/flush behavior.
+- Operations: add SQL logging, slow-query hooks, metrics/tracing, normalized driver errors, retry policy hooks, and clearer connection ownership docs.
+- Tooling: harden package publishing, keep examples current, and expand editor support beyond the VS Code MVP.
 
 ### E2E Database Tests
 
