@@ -13,7 +13,7 @@ extension and examples.
 Do not publish `examples/*` or `packages/vscode` to npm. The VS Code package is
 distributed as a VSIX/Marketplace extension.
 
-## v0.1.0 Checklist
+## v0.1.0-beta.0 Checklist
 
 Use `pnpm pack`, not `npm pack`, for workspace packages. `pnpm pack` rewrites
 `workspace:^` dependencies in the packed manifest, which prevents consumers from
@@ -30,17 +30,17 @@ pnpm run release:inspect
 ```
 
 Inspecting the packed manifests should show `@node-persistence-api/core` dependencies as
-normal semver ranges such as `^0.1.0`, not `workspace:^`.
+normal semver ranges such as `^0.1.0-beta.0`, not `workspace:^`.
 
 For the first public publish of scoped packages, npm requires public access to be
 set explicitly. The package manifests include `publishConfig.access=public`, and
 the commands below pass `--access public` as an extra guard.
 
 ```bash
-npm publish .release/node-persistence-api-core-0.1.0.tgz --access public
-npm publish .release/node-persistence-api-language-0.1.0.tgz --access public
-npm publish .release/node-persistence-api-connector-pg-0.1.0.tgz --access public
-npm publish .release/node-persistence-api-connector-mysql-0.1.0.tgz --access public
+npm publish .release/node-persistence-api-core-0.1.0-beta.0.tgz --access public --tag beta
+npm publish .release/node-persistence-api-language-0.1.0-beta.0.tgz --access public --tag beta
+npm publish .release/node-persistence-api-connector-pg-0.1.0-beta.0.tgz --access public --tag beta
+npm publish .release/node-persistence-api-connector-mysql-0.1.0-beta.0.tgz --access public --tag beta
 ```
 
 Publish order matters: core first, then language helpers, then database
