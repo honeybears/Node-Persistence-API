@@ -1,8 +1,12 @@
 # Node Persistence API (NPA)
 
-NPA provides Spring Data JPA style repositories for Node and TypeScript. Application code
-depends on `NPARepository<TEntity, TId>`, while the selected adapter handles the
-actual database runtime such as PostgreSQL or MySQL.
+NPA provides repository APIs for Node and TypeScript inspired by familiar
+persistence patterns from the Java ecosystem. Application code depends on
+`NPARepository<TEntity, TId>`, while the selected adapter handles the actual
+database runtime such as PostgreSQL or MySQL.
+
+NPA is an independent project. It is not affiliated with Oracle, the Eclipse
+Foundation, Jakarta EE, Spring, or Broadcom.
 
 ## Install
 
@@ -97,9 +101,9 @@ so repositories, application code, and migration tooling can reference them.
 ## Repository Usage
 
 Application code extends only NPA, not a database-specific repository type.
-`NPARepository` provides JPA-style base methods including `findById`, `findAll`,
-`existsById`, `count`, `save`, `insert`, `update`, `updateById`, `delete`,
-`deleteById`, and `deleteAll`.
+`NPARepository` provides familiar persistence base methods including `findById`,
+`findAll`, `existsById`, `count`, `save`, `insert`, `update`, `updateById`,
+`delete`, `deleteById`, and `deleteAll`.
 
 Declare repositories as abstract classes and bind them to entities with
 `@Repository`. Imported decorated repositories are auto-registered when
@@ -359,7 +363,7 @@ and throws `OptimisticLockError` when no row matches the expected version.
 ## Runtime Flow
 
 1. Service code calls a method on `UserRepository`.
-2. JPA-style base methods (`findById`, `findAll`, `existsById`, `count`,
+2. Familiar persistence base methods (`findById`, `findAll`, `existsById`, `count`,
    `save`, `insert`, `updateById`, `deleteById`, `deleteAll`) go through the NPA
    adapter directly.
 3. Derived methods (`findBy...`, `existsBy...`, `countBy...`, `deleteBy...`) are
@@ -370,7 +374,8 @@ and throws `OptimisticLockError` when no row matches the expected version.
 
 `@node-persistence-api/language` is an editor-independent package for future VS Code
 and IDEA support. It does not execute user code or talk to a database. Feed it an
-entity schema and it returns Spring Data-style method completions and diagnostics.
+entity schema and it returns repository method completions and diagnostics
+inspired by Spring Data patterns.
 
 ```ts
 import {
