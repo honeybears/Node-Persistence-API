@@ -436,6 +436,29 @@ pnpm bench:live
 
 Use `--include=npa,postgresql,mysql,prisma,typeorm` to choose lanes. `Ops/s` is TPS for single-query live lanes; the performance report includes avg/p95 latency, total operations, throughput, and errors. Override container images with `NPA_BENCH_POSTGRESQL_IMAGE` and `NPA_BENCH_MYSQL_IMAGE`.
 
+The `--duration` value is applied per scenario and adapter. For example, `--duration=60` with PostgreSQL and MySQL plus all scenarios runs read-heavy and write-and-read for each database.
+
+Example local live result from `pnpm bench -- --live --duration=60 --virtual-users=50 --pool-size=10`:
+
+| Scenario | Metric | PostgreSQL | MySQL |
+| --- | --- | ---: | ---: |
+| Single Query | findOneByEmail TPS | 3,150.97/s | 2,656.43/s |
+| Read-Heavy | List Posts avg | 3.44ms | 3.87ms |
+| Read-Heavy | List Posts p95 | 5.373ms | 6.346ms |
+| Read-Heavy | Get By ID avg | 3.394ms | 3.86ms |
+| Read-Heavy | Get By ID p95 | 5.297ms | 6.346ms |
+| Read-Heavy | Total reads | 877,880 | 776,032 |
+| Read-Heavy | Reads/second | 14,630.31/s | 12,932.8/s |
+| Write-and-Read | Create Post avg | 3.836ms | 14.076ms |
+| Write-and-Read | Create Post p95 | 6.336ms | 23.507ms |
+| Write-and-Read | Get Post avg | 3.395ms | 5.87ms |
+| Write-and-Read | Get Post p95 | 5.587ms | 10.014ms |
+| Write-and-Read | Total iterations | 414,844 | 150,409 |
+| Write-and-Read | Iterations/second | 6,913.65/s | 2,506.4/s |
+| All | Errors | 0 | 0 |
+
+These numbers are machine-dependent; use the same machine, Node version, container images, pool size, virtual users, and duration when comparing changes.
+
 ### E2E Database Tests
 
 Real database E2E tests run separately from the unit suite and use
