@@ -1,4 +1,5 @@
 import { parseQueryMethod } from "./parse-query-method";
+import { assertNoDuplicateQueryPredicates } from "./validation";
 import { QueryMethodExecutor } from "./types";
 
 export function createQueryMethodProxy<TTarget extends object>(
@@ -13,6 +14,7 @@ export function createQueryMethodProxy<TTarget extends object>(
 
       return (...args: unknown[]) => {
         const query = parseQueryMethod(property);
+        assertNoDuplicateQueryPredicates(query);
 
         if (args.length !== query.parameterCount) {
           throw new Error(

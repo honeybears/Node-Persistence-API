@@ -1,4 +1,8 @@
-import type { QueryMethodAction, QueryOperator } from "@honeybeaers/npa/query-method";
+import {
+  findDuplicateQueryPredicates,
+  type QueryMethodAction,
+  type QueryOperator,
+} from "@honeybeaers/npa/query-method";
 import {
   findEntitySchema,
   getDirectQueryProperties,
@@ -162,8 +166,17 @@ export function getNPAQueryMethodCompletions(
 
   return uniqueCompletions(completions)
     .filter((completion) => completion.name.startsWith(options.prefix))
+    .filter((completion) => !hasDuplicatePredicates(completion.name))
     .sort((left, right) => (left.sortText ?? left.name).localeCompare(right.sortText ?? right.name))
     .slice(0, options.limit ?? 100);
+}
+
+function hasDuplicatePredicates(methodName: string): boolean {
+  try {
+    return findDuplicateQueryPredicates(parseNPAQueryMethodName(methodName)).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function getActionSubjects(action: QueryMethodAction): CompletionActionSubject[] {

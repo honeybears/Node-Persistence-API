@@ -1,4 +1,8 @@
-import type { QueryOperator } from "@honeybeaers/npa/query-method";
+import {
+  findDuplicateQueryPredicates,
+  type QueryOperator,
+  type QueryPredicatePart,
+} from "@honeybeaers/npa/query-method";
 import {
   getDirectQueryProperties,
   getRelationProperties,
@@ -39,6 +43,16 @@ const OPERATOR_SUFFIXES: Record<QueryOperator, string> = {
   false: "False",
 };
 
+function getPredicateRangeText(part: QueryPredicatePart): string {
+  const connector = part.connector === "and"
+    ? "And"
+    : part.connector === "or"
+      ? "Or"
+      : "";
+
+  return `${connector}${toMethodSegment(part.condition.property)}${OPERATOR_SUFFIXES[part.condition.operator]}${part.condition.ignoreCase ? "IgnoreCase" : ""}`;
+}
+
 export function validateNPAQueryMethod(
   options: ValidateNPAQueryMethodOptions,
 ): NPAQueryMethodValidationResult {
@@ -46,6 +60,15 @@ export function validateNPAQueryMethod(
 
   try {
     const parsed = parseNPAQueryMethodName(options.methodName);
+
+    for (const duplicate of findDuplicateQueryPredicates(parsed)) {
+      diagnostics.push(error(
+        NPAQueryMethodDiagnosticCode.DUPLICATE_PREDICATE,
+        `Duplicate query predicate "${duplicate.property}" with operator "${duplicate.operator}" in ${options.methodName}. Use a different operator or In/NotIn instead.`,
+        duplicate.property,
+        getPredicateRangeText(duplicate.duplicate),
+      ));
+    }
 
     for (const part of parsed.predicate) {
       const methodProperty = part.condition.property;

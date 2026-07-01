@@ -151,6 +151,48 @@ test("generates query method completions after And and Or connectors", () => {
   );
 });
 
+test("rejects exact duplicate predicates while allowing different operators", () => {
+  const workspace = createWorkspace();
+  const user = workspace.entities.find((entity) => entity.className === "User");
+
+  const duplicateAnd = validateNPAQueryMethod({
+    methodName: "findByNameAndName",
+    entity: user,
+    workspace,
+  }).diagnostics[0];
+
+  assert.equal(duplicateAnd.code, NPAQueryMethodDiagnosticCode.DUPLICATE_PREDICATE);
+  assert.equal(duplicateAnd.rangeText, "AndName");
+
+  const duplicateOr = validateNPAQueryMethod({
+    methodName: "findByNameOrName",
+    entity: user,
+    workspace,
+  }).diagnostics[0];
+
+  assert.equal(duplicateOr.code, NPAQueryMethodDiagnosticCode.DUPLICATE_PREDICATE);
+  assert.equal(duplicateOr.rangeText, "OrName");
+
+  assert.deepEqual(
+    validateNPAQueryMethod({
+      methodName: "findByNameOrNameContaining",
+      entity: user,
+      workspace,
+    }).diagnostics,
+    [],
+  );
+
+  const names = getNPAQueryMethodCompletions({
+    prefix: "findByNameAndNa",
+    entity: user,
+    workspace,
+    limit: 100,
+  }).map((completion) => completion.name);
+
+  assert.ok(!names.includes("findByNameAndName"));
+  assert.ok(names.includes("findByNameAndNameContaining"));
+});
+
 test("supports ManyToOne relation object query methods", () => {
   const workspace = createWorkspace();
   const user = workspace.entities.find((entity) => entity.className === "User");

@@ -10,5 +10,7 @@ export abstract class UserRepository extends NPARepository<User, number> {
 
   abstract findByNaem(name: string): Promise<User[]>;
 
+  abstract findByNameOrName(name: string, duplicateName: string): Promise<User[]>;
+
   abstract findByAgeIgnoreCase(age: number): Promise<User[]>;
 }

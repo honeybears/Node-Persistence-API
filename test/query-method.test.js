@@ -83,6 +83,23 @@ test("parses distinct, first/top, ignore-case, all-ignore-case, and multi-order 
   assert.equal(parseQueryMethod("findTopByName").limit, 1);
 });
 
+test("rejects exact duplicate predicates before execution", () => {
+  const repository = createQueryMethodProxy({}, () => "ok");
+
+  assert.throws(
+    () => repository.findByEmailOrEmail("a@example.com", "b@example.com"),
+    /duplicate predicate "email equals"/,
+  );
+  assert.throws(
+    () => repository.findByEmailAndEmail("a@example.com", "b@example.com"),
+    /duplicate predicate "email equals"/,
+  );
+  assert.equal(
+    repository.findByEmailOrEmailContaining("a@example.com", "example.com"),
+    "ok",
+  );
+});
+
 test("validates derived query parameter count before execution", () => {
   const repository = createQueryMethodProxy({}, () => []);
 

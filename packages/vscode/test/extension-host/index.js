@@ -73,11 +73,17 @@ async function getCompletion(repositoryDocument, prefix, expectedLabel) {
 }
 
 async function assertDiagnosticsAndQuickFix(repositoryDocument) {
-  const diagnostics = await waitForDiagnostics(repositoryDocument.uri, 2);
+  const diagnostics = await waitForDiagnostics(repositoryDocument.uri, 3);
   assert.ok(
     diagnostics.some((diagnostic) => diagnostic.message.includes("IgnoreCase is only supported")),
     `expected IgnoreCase diagnostic, got ${diagnostics.map((item) => item.message).join(" | ")}`,
   );
+
+  const duplicateDiagnostic = diagnostics.find((diagnostic) =>
+    diagnostic.message.includes('Duplicate query predicate "name"'),
+  );
+  assert.ok(duplicateDiagnostic, "expected duplicate predicate diagnostic for findByNameOrName");
+  assert.equal(repositoryDocument.getText(duplicateDiagnostic.range), "OrName");
 
   const typoDiagnostic = diagnostics.find((diagnostic) =>
     diagnostic.message.includes('Unknown query property "naem"'),
