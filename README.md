@@ -408,6 +408,26 @@ pnpm test
 pnpm pack
 ```
 
+### Benchmarks
+
+Run local no-DB benchmarks for parser, duplicate predicate validation, proxy dispatch, and SQL compilation:
+
+```bash
+pnpm bench
+pnpm bench -- --iterations=1000 --warmup=100
+pnpm bench:json
+```
+
+Live PostgreSQL/MySQL benchmarks are opt-in because they measure driver and network round trips too:
+
+```bash
+NPA_BENCH_PG_URL=postgres://user:pass@localhost:5432/db \
+NPA_BENCH_MYSQL_URL=mysql://user:pass@localhost:3306/db \
+pnpm bench:live
+```
+
+Use `--include=npa,postgresql,mysql,prisma,typeorm` to choose lanes. Prisma and TypeORM are reported as skipped until a dedicated comparison fixture provides their generated client/data source.
+
 ### E2E Database Tests
 
 Real database E2E tests run separately from the unit suite and use
