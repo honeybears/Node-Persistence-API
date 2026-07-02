@@ -41,6 +41,12 @@ Column()(PgProduct.prototype, "price");
 Version({ name: "lock_version" })(PgProduct.prototype, "version");
 Entity({ name: "products" })(PgProduct);
 
+class PgPlainProduct {}
+
+Id({ name: "product_id" })(PgPlainProduct.prototype, "id");
+Column({ name: "product_name" })(PgPlainProduct.prototype, "name");
+Entity({ name: "products" })(PgPlainProduct);
+
 class PgProductRepository extends NPARepository {
   repositoryName() {
     return "pg-products";
@@ -855,6 +861,44 @@ test("runs save, insert, updateById, and deleteById through a PostgreSQL queryab
     {
       text: 'DELETE FROM "users"',
       values: [],
+    },
+  ]);
+});
+
+test("uses optimistic PostgreSQL updateById SQL only for versioned entities", async () => {
+  const calls = [];
+  const queryable = {
+    async query(text, values) {
+      calls.push({ text, values });
+
+      return {
+        rows: [{ product_id: values.at(-2) ?? values.at(-1), product_name: values[0], lock_version: 1 }],
+        rowCount: 1,
+      };
+    },
+  };
+  const versioned = createPostgresqlDerivedQueryRepository(
+    {},
+    { entity: PgProduct, queryable },
+  );
+  const plain = createPostgresqlDerivedQueryRepository(
+    {},
+    { entity: PgPlainProduct, queryable },
+  );
+
+  await versioned.updateById(1, { name: "chair", version: 0 });
+  await plain.updateById(2, { name: "desk" });
+
+  assert.deepEqual(calls, [
+    {
+      text:
+        'UPDATE "products" SET "product_name" = $1, "lock_version" = "lock_version" + 1 WHERE "product_id" = $2 AND "lock_version" = $3 RETURNING *',
+      values: ["chair", 1, 0],
+    },
+    {
+      text:
+        'UPDATE "products" SET "product_name" = $1 WHERE "product_id" = $2 RETURNING *',
+      values: ["desk", 2],
     },
   ]);
 });

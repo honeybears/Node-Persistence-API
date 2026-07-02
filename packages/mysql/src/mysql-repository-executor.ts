@@ -1,5 +1,6 @@
 import {
   getCurrentPersistenceContext,
+  getOptionalEntityMetadata,
   type EntityTarget,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
@@ -177,7 +178,13 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     id: TId,
     patch: Partial<TEntity>,
   ): Promise<TEntity | null> => {
-    const query = compileMysqlUpdate(id, patch, this.options);
+    const expectedVersion = readExpectedVersionFromPatch(
+      patch,
+      this.options.entity,
+    );
+    const query = expectedVersion === undefined
+      ? compileMysqlUpdate(id, patch, this.options)
+      : compileMysqlVersionedUpdate(id, patch, expectedVersion, this.options);
     const result = await executeMysqlQuery<TEntity>(
       this.options,
       query.text,
@@ -339,4 +346,27 @@ function firstColumn(row: object | null): unknown {
 
   const [value] = Object.values(row);
   return value ?? null;
+}
+
+function readExpectedVersionFromPatch(
+  patch: object,
+  entity: EntityTarget | undefined,
+): unknown {
+  const versionColumn = getOptionalEntityMetadata(entity)?.versionColumn;
+
+  if (!versionColumn) {
+    return undefined;
+  }
+
+  const record = patch as Record<string, unknown>;
+
+  if (versionColumn.propertyName in record) {
+    return record[versionColumn.propertyName];
+  }
+
+  if (versionColumn.columnName in record) {
+    return record[versionColumn.columnName];
+  }
+
+  return undefined;
 }

@@ -1,5 +1,6 @@
 import {
   getCurrentPersistenceContext,
+  getOptionalEntityMetadata,
   type EntityTarget,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
@@ -164,7 +165,13 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     id: TId,
     patch: Partial<TEntity>,
   ): Promise<TEntity | null> => {
-    const query = compilePostgresqlUpdate(id, patch, this.options);
+    const expectedVersion = readExpectedVersionFromPatch(
+      patch,
+      this.options.entity,
+    );
+    const query = expectedVersion === undefined
+      ? compilePostgresqlUpdate(id, patch, this.options)
+      : compilePostgresqlVersionedUpdate(id, patch, expectedVersion, this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
       query.values,
@@ -311,4 +318,27 @@ function firstColumn(row: object | null): unknown {
 
   const [value] = Object.values(row);
   return value ?? null;
+}
+
+function readExpectedVersionFromPatch(
+  patch: object,
+  entity: EntityTarget | undefined,
+): unknown {
+  const versionColumn = getOptionalEntityMetadata(entity)?.versionColumn;
+
+  if (!versionColumn) {
+    return undefined;
+  }
+
+  const record = patch as Record<string, unknown>;
+
+  if (versionColumn.propertyName in record) {
+    return record[versionColumn.propertyName];
+  }
+
+  if (versionColumn.columnName in record) {
+    return record[versionColumn.columnName];
+  }
+
+  return undefined;
 }

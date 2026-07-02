@@ -773,6 +773,59 @@ test("runs derived queries and CRUD through a mysql2-style queryable", async () 
   ]);
 });
 
+test("uses optimistic MySQL updateById SQL only for versioned entities", async () => {
+  const calls = [];
+  const queryable = {
+    async query(text, values) {
+      calls.push({ text, values });
+
+      if (text.startsWith("UPDATE")) {
+        return [{ affectedRows: 1 }, []];
+      }
+
+      return [[{
+        product_id: values[0],
+        product_name: "chair",
+        lock_version: 1,
+      }], []];
+    },
+  };
+  const versioned = createMysqlDerivedQueryRepository(
+    {},
+    { entity: VersionedProduct, queryable },
+  );
+  const plain = createMysqlDerivedQueryRepository(
+    {},
+    { entity: Product, queryable },
+  );
+
+  await versioned.updateById(10, { name: "chair", version: 0 });
+  await plain.updateById(11, { name: "desk" });
+
+  assert.deepEqual(calls, [
+    {
+      text:
+        "UPDATE `shop`.`products` SET `product_name` = ?, `lock_version` = `lock_version` + 1 WHERE `product_id` = ? AND `lock_version` = ?",
+      values: ["chair", 10, 0],
+    },
+    {
+      text:
+        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+      values: [10],
+    },
+    {
+      text:
+        "UPDATE `shop`.`products` SET `product_name` = ? WHERE `product_id` = ?",
+      values: ["desk", 11],
+    },
+    {
+      text:
+        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+      values: [11],
+    },
+  ]);
+});
+
 test("loads MySQL many-to-one, one-to-many, and many-to-many relations", async () => {
   const calls = [];
   const queryable = {
