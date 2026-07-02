@@ -1,5 +1,41 @@
-import { compilePostgresqlDeleteById, compilePostgresqlDeleteAll, compilePostgresqlExistsById, compilePostgresqlFindAll, compilePostgresqlFindById, compilePostgresqlInsert, compilePostgresqlCount, compilePostgresqlQuery, compilePostgresqlRawQuery, compilePostgresqlUpdate, compilePostgresqlVersionedUpdate, createPostgresqlDerivedQueryRepository, PostgresqlConnection, postgresql, type PostgresqlDriverConnection, type PostgresqlQueryable } from "../src";
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
+import {
+  compilePostgresqlDeleteById,
+  compilePostgresqlDeleteAll,
+  compilePostgresqlExistsById,
+  compilePostgresqlFindAll,
+  compilePostgresqlFindById,
+  compilePostgresqlInsert,
+  compilePostgresqlCount,
+  compilePostgresqlQuery,
+  compilePostgresqlRawQuery,
+  compilePostgresqlUpdate,
+  compilePostgresqlVersionedUpdate,
+  createPostgresqlDerivedQueryRepository,
+  PostgresqlConnection,
+  postgresql,
+  type PostgresqlDriverConnection,
+  type PostgresqlQueryable,
+} from "../src";
+import {
+  AbstractTransactionManager,
+  Column,
+  CreatedAt,
+  Entity,
+  EntityGraph,
+  Id,
+  Loaded,
+  ManyToMany,
+  ManyToOne,
+  NPARepository,
+  OneToMany,
+  Query,
+  Repository,
+  UpdatedAt,
+  Version,
+  createNPA,
+  defineEntityGraph,
+  parseQueryMethod,
+} from "../../../src";
 import { describe, expect, test } from "@jest/globals";
 
 type DynamicRepository = Record<string, (...args: unknown[]) => unknown>;
@@ -103,16 +139,18 @@ class PgMember {
   roles!: PgRole[];
 }
 
+const memberGraph = defineEntityGraph<PgMember>({
+  team: {
+    organization: true,
+  },
+  roles: true,
+});
+
 abstract class PgMemberGraphRepository extends NPARepository<PgMember, number> {
-  @EntityGraph({
-    relations: {
-      team: {
-        organization: true,
-      },
-      roles: true,
-    },
-  })
-  abstract findByName: (name: string) => Promise<PgMember[]>;
+  @EntityGraph(memberGraph)
+  abstract findByName: (
+    name: string,
+  ) => Promise<Loaded<PgMember, typeof memberGraph>[]>;
 }
 
 @Entity({ name: "broken_teams" })
@@ -149,7 +187,8 @@ class TestTransactionManager extends AbstractTransactionManager<object> {
 }
 describe("PostgreSQL adapter", () => {
   test("compiles a derived query method into parameterized PostgreSQL SQL", () => {
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod(
             "findTop2ByNameContainingAndAgeGreaterThanOrderByCreatedAtDesc",
@@ -162,13 +201,14 @@ describe("PostgreSQL adapter", () => {
             createdAt: "created_at",
           },
         },
-      )).toEqual({
-        text:
-          'SELECT * FROM "users" WHERE ("name" LIKE $1 AND "age" > $2) ORDER BY "created_at" DESC LIMIT 2',
-        values: ["%kim%", 20],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "users" WHERE ("name" LIKE $1 AND "age" > $2) ORDER BY "created_at" DESC LIMIT 2',
+      values: ["%kim%", 20],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod(
             "findDistinctTop2ByNameContainingIgnoreCaseAndEmailAllIgnoreCaseOrderByNameAscAgeDesc",
@@ -176,11 +216,11 @@ describe("PostgreSQL adapter", () => {
           args: ["KIM", "A@EXAMPLE.COM"],
         },
         { tableName: "users" },
-      )).toEqual({
-        text:
-          'SELECT DISTINCT * FROM "users" WHERE (LOWER("name") LIKE $1 AND LOWER("email") = $2) ORDER BY "name" ASC, "age" DESC LIMIT 2',
-        values: ["%kim%", "a@example.com"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT DISTINCT * FROM "users" WHERE (LOWER("name") LIKE $1 AND LOWER("email") = $2) ORDER BY "name" ASC, "age" DESC LIMIT 2',
+      values: ["%kim%", "a@example.com"],
+    });
   });
 
   test("preserves AND precedence by grouping OR predicate parts", () => {
@@ -193,198 +233,225 @@ describe("PostgreSQL adapter", () => {
     );
 
     expect(compiled).toEqual({
-      text:
-        'SELECT * FROM "users" WHERE ("name" = $1) OR ("age" > $2 AND "active" IS TRUE)',
+      text: 'SELECT * FROM "users" WHERE ("name" = $1) OR ("age" > $2 AND "active" IS TRUE)',
       values: ["kim", 20],
     });
   });
 
   test("compiles PostgreSQL null and empty-list derived query parameters", () => {
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByName"),
           args: [null],
         },
         { tableName: "users" },
-      )).toEqual({
-        text: 'SELECT * FROM "users" WHERE ("name" IS NULL)',
-        values: [],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "users" WHERE ("name" IS NULL)',
+      values: [],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByNameNot"),
           args: [null],
         },
         { tableName: "users" },
-      )).toEqual({
-        text: 'SELECT * FROM "users" WHERE ("name" IS NOT NULL)',
-        values: [],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "users" WHERE ("name" IS NOT NULL)',
+      values: [],
+    });
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByStatusIn"),
-            args: [[]],
-          },
-          { tableName: "users" },
-        )).toThrow(/expects a non-empty array parameter/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByStatusIn"),
+          args: [[]],
+        },
+        { tableName: "users" },
+      ),
+    ).toThrow(/expects a non-empty array parameter/);
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByStatusNotIn"),
-            args: [[]],
-          },
-          { tableName: "users" },
-        )).toThrow(/expects a non-empty array parameter/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByStatusNotIn"),
+          args: [[]],
+        },
+        { tableName: "users" },
+      ),
+    ).toThrow(/expects a non-empty array parameter/);
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByName"),
-            args: [undefined],
-          },
-          { tableName: "users" },
-        )).toThrow(/must not be undefined/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByName"),
+          args: [undefined],
+        },
+        { tableName: "users" },
+      ),
+    ).toThrow(/must not be undefined/);
   });
 
   test("compiles PostgreSQL derived queries across relation fields", () => {
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByTeam"),
           args: [{ id: 7, label: "platform" }],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT * FROM "members" WHERE ("team_id" = $1)',
-        values: [7],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "members" WHERE ("team_id" = $1)',
+      values: [7],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByTeamIn"),
-          args: [[{ id: 7, label: "platform" }, { id: 8, label: "infra" }]],
+          args: [
+            [
+              { id: 7, label: "platform" },
+              { id: 8, label: "infra" },
+            ],
+          ],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT * FROM "members" WHERE ("team_id" = ANY($1))',
-        values: [[7, 8]],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "members" WHERE ("team_id" = ANY($1))',
+      values: [[7, 8]],
+    });
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByTeam"),
-            args: [{ label: "platform" }],
-          },
-          { entity: PgMember },
-        )).toThrow(/Relation team requires PgTeam.id or team_id/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByTeam"),
+          args: [{ label: "platform" }],
+        },
+        { entity: PgMember },
+      ),
+    ).toThrow(/Relation team requires PgTeam.id or team_id/);
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByTeamLabelAndNameOrderByTeamLabelDesc"),
           args: ["platform", "kim"],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE ("npa_1"."label" = $1 AND "npa_0"."name" = $2) ORDER BY "npa_1"."label" DESC',
-        values: ["platform", "kim"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE ("npa_1"."label" = $1 AND "npa_0"."name" = $2) ORDER BY "npa_1"."label" DESC',
+      values: ["platform", "kim"],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
-          query: parseQueryMethod("findByTeamOrganizationNameOrderByTeamOrganizationNameDesc"),
+          query: parseQueryMethod(
+            "findByTeamOrganizationNameOrderByTeamOrganizationNameDesc",
+          ),
           args: ["openai"],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" JOIN "organizations" AS "npa_2" ON "npa_1"."organization_id" = "npa_2"."organization_id" WHERE ("npa_2"."name" = $1) ORDER BY "npa_2"."name" DESC',
-        values: ["openai"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" JOIN "organizations" AS "npa_2" ON "npa_1"."organization_id" = "npa_2"."organization_id" WHERE ("npa_2"."name" = $1) ORDER BY "npa_2"."name" DESC',
+      values: ["openai"],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("countByMembersName"),
           args: ["kim"],
         },
         { entity: PgTeam },
-      )).toEqual({
-        text:
-          'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" WHERE ("npa_1"."name" = $1)',
-        values: ["kim"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" WHERE ("npa_1"."name" = $1)',
+      values: ["kim"],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("countByMembersRolesName"),
           args: ["admin"],
         },
         { entity: PgTeam },
-      )).toEqual({
-        text:
-          'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" JOIN "member_roles" AS "npa_3" ON "npa_3"."pg_member_member_id" = "npa_1"."member_id" JOIN "roles" AS "npa_2" ON "npa_2"."role_id" = "npa_3"."pg_role_role_id" WHERE ("npa_2"."name" = $1)',
-        values: ["admin"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" JOIN "member_roles" AS "npa_3" ON "npa_3"."pg_member_member_id" = "npa_1"."member_id" JOIN "roles" AS "npa_2" ON "npa_2"."role_id" = "npa_3"."pg_role_role_id" WHERE ("npa_2"."name" = $1)',
+      values: ["admin"],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("countDistinctByTeamLabelIgnoreCase"),
           args: ["PLATFORM"],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT COUNT(DISTINCT "npa_0"."member_id")::int AS "count" FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE (LOWER("npa_1"."label") = $1)',
-        values: ["platform"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT COUNT(DISTINCT "npa_0"."member_id")::int AS "count" FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE (LOWER("npa_1"."label") = $1)',
+      values: ["platform"],
+    });
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("findByRolesName"),
           args: ["admin"],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "member_roles" AS "npa_2" ON "npa_2"."pg_member_member_id" = "npa_0"."member_id" JOIN "roles" AS "npa_1" ON "npa_1"."role_id" = "npa_2"."pg_role_role_id" WHERE ("npa_1"."name" = $1)',
-        values: ["admin"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "member_roles" AS "npa_2" ON "npa_2"."pg_member_member_id" = "npa_0"."member_id" JOIN "roles" AS "npa_1" ON "npa_1"."role_id" = "npa_2"."pg_role_role_id" WHERE ("npa_1"."name" = $1)',
+      values: ["admin"],
+    });
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByRolesMissing"),
-            args: ["admin"],
-          },
-          { entity: PgMember },
-        )).toThrow(/Relation query PgMember\.rolesMissing targets PgRole\.missing, but that property is not a column/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByRolesMissing"),
+          args: ["admin"],
+        },
+        { entity: PgMember },
+      ),
+    ).toThrow(
+      /Relation query PgMember\.rolesMissing targets PgRole\.missing, but that property is not a column/,
+    );
 
     expect(() =>
-        compilePostgresqlQuery(
-          {
-            query: parseQueryMethod("findByMembersName"),
-            args: ["kim"],
-          },
-          { entity: PgBrokenTeam },
-        )).toThrow(/@OneToMany PgBrokenTeam\.members requires mappedBy/);
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByMembersName"),
+          args: ["kim"],
+        },
+        { entity: PgBrokenTeam },
+      ),
+    ).toThrow(/@OneToMany PgBrokenTeam\.members requires mappedBy/);
 
-    expect(compilePostgresqlQuery(
+    expect(
+      compilePostgresqlQuery(
         {
           query: parseQueryMethod("deleteByTeamLabel"),
           args: ["platform"],
         },
         { entity: PgMember },
-      )).toEqual({
-        text:
-          'DELETE FROM "members" AS "npa_0" USING "teams" AS "npa_1" WHERE "npa_0"."team_id" = "npa_1"."team_id" AND ("npa_1"."label" = $1)',
-        values: ["platform"],
-      });
+      ),
+    ).toEqual({
+      text: 'DELETE FROM "members" AS "npa_0" USING "teams" AS "npa_1" WHERE "npa_0"."team_id" = "npa_1"."team_id" AND ("npa_1"."label" = $1)',
+      values: ["platform"],
+    });
   });
 
   test("runs findOne, exists, count, and delete through a PostgreSQL queryable", async () => {
@@ -427,9 +494,13 @@ describe("PostgreSQL adapter", () => {
       name: "kim alpha",
       created_at: 3,
     });
-    expect(await repository.existsByActiveFalseAndNameStartingWith("kim")).toEqual(true);
+    expect(
+      await repository.existsByActiveFalseAndNameStartingWith("kim"),
+    ).toEqual(true);
     expect(await repository.countByAgeBetween(20, 40)).toEqual(2);
-    expect(await repository.deleteByStatusIn(["inactive", "blocked"])).toEqual(2);
+    expect(await repository.deleteByStatusIn(["inactive", "blocked"])).toEqual(
+      2,
+    );
 
     expect(calls).toEqual([
       {
@@ -437,13 +508,11 @@ describe("PostgreSQL adapter", () => {
         values: ["kim alpha"],
       },
       {
-        text:
-          'SELECT EXISTS(SELECT 1 FROM "users" WHERE ("active" IS FALSE AND "name" LIKE $1)) AS "exists"',
+        text: 'SELECT EXISTS(SELECT 1 FROM "users" WHERE ("active" IS FALSE AND "name" LIKE $1)) AS "exists"',
         values: ["kim%"],
       },
       {
-        text:
-          'SELECT COUNT(*)::int AS "count" FROM "users" WHERE ("age" BETWEEN $1 AND $2)',
+        text: 'SELECT COUNT(*)::int AS "count" FROM "users" WHERE ("age" BETWEEN $1 AND $2)',
         values: [20, 40],
       },
       {
@@ -469,7 +538,8 @@ describe("PostgreSQL adapter", () => {
       adapter: postgresql({ queryable: asPgQueryable(queryable) }),
       repositories: [PgProductRepository],
     });
-    const products = npa.get(PgProductRepository) as PgProductRepository & DynamicRepository;
+    const products = npa.get(PgProductRepository) as PgProductRepository &
+      DynamicRepository;
 
     expect(products instanceof PgProductRepository).toEqual(true);
     expect(products.repositoryName()).toEqual("pg-products");
@@ -501,32 +571,31 @@ describe("PostgreSQL adapter", () => {
       },
     };
 
-    expect(compilePostgresqlInsert(
+    expect(
+      compilePostgresqlInsert(
         { id: undefined, name: "kim", age: 20, createdAt: 3 },
         options,
-      )).toEqual({
-        text:
-          'INSERT INTO "users" ("name", "age", "created_at") VALUES ($1, $2, $3) RETURNING *',
-        values: ["kim", 20, 3],
-      });
-    expect(compilePostgresqlUpdate(
-        1,
-        { id: 1, name: "lee", createdAt: 4 },
-        options,
-      )).toEqual({
-        text:
-          'UPDATE "users" SET "name" = $1, "created_at" = $2 WHERE "id" = $3 RETURNING *',
-        values: ["lee", 4, 1],
-      });
-    expect(() => compilePostgresqlUpdate(1, { id: 1 }, options)).toThrow(/without changed values/);
+      ),
+    ).toEqual({
+      text: 'INSERT INTO "users" ("name", "age", "created_at") VALUES ($1, $2, $3) RETURNING *',
+      values: ["kim", 20, 3],
+    });
+    expect(
+      compilePostgresqlUpdate(1, { id: 1, name: "lee", createdAt: 4 }, options),
+    ).toEqual({
+      text: 'UPDATE "users" SET "name" = $1, "created_at" = $2 WHERE "id" = $3 RETURNING *',
+      values: ["lee", 4, 1],
+    });
+    expect(() => compilePostgresqlUpdate(1, { id: 1 }, options)).toThrow(
+      /without changed values/,
+    );
     expect(() =>
-        compilePostgresqlVersionedUpdate(
-          1,
-          { id: 1, version: 2 },
-          2,
-          { entity: PgProduct },
-        )).toThrow(/without changed values/);
-    expect(compilePostgresqlUpdate(
+      compilePostgresqlVersionedUpdate(1, { id: 1, version: 2 }, 2, {
+        entity: PgProduct,
+      }),
+    ).toThrow(/without changed values/);
+    expect(
+      compilePostgresqlUpdate(
         1,
         { displayName: "kim" },
         {
@@ -535,11 +604,11 @@ describe("PostgreSQL adapter", () => {
             displayName: 'display"name',
           },
         },
-      )).toEqual({
-        text:
-          'UPDATE "audit"."user""events" SET "display""name" = $1 WHERE "id" = $2 RETURNING *',
-        values: ["kim", 1],
-      });
+      ),
+    ).toEqual({
+      text: 'UPDATE "audit"."user""events" SET "display""name" = $1 WHERE "id" = $2 RETURNING *',
+      values: ["kim", 1],
+    });
     expect(compilePostgresqlDeleteById(1, options)).toEqual({
       text: 'DELETE FROM "users" WHERE "id" = $1',
       values: [1],
@@ -559,8 +628,7 @@ describe("PostgreSQL adapter", () => {
       values: [1],
     });
     expect(compilePostgresqlExistsById(1, options)).toEqual({
-      text:
-        'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
+      text: 'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
       values: [1],
     });
     expect(compilePostgresqlFindAll(options)).toEqual({
@@ -598,24 +666,25 @@ describe("PostgreSQL adapter", () => {
       },
     };
 
-    abstract class RawProductRepository extends NPARepository<PgProduct, number> {}
+    abstract class RawProductRepository extends NPARepository<
+      PgProduct,
+      number
+    > {}
 
-    Query('SELECT * FROM "products" WHERE "price" > :minPrice', { result: "many" })(
-      RawProductRepository.prototype,
-      "findExpensiveProducts",
-    );
-    Query('SELECT * FROM "products" WHERE "product_id" = :id', { result: "one" })(
-      RawProductRepository.prototype,
-      "findOneProductRaw",
-    );
-    Query('SELECT COUNT(*) AS total FROM "products" WHERE "price" > :minPrice', { result: "scalar" })(
-      RawProductRepository.prototype,
-      "countProductsRaw",
-    );
-    Query('UPDATE "products" SET "price" = "price" + :amount WHERE "price" < :amount', { result: "execute" })(
-      RawProductRepository.prototype,
-      "raisePricesRaw",
-    );
+    Query('SELECT * FROM "products" WHERE "price" > :minPrice', {
+      result: "many",
+    })(RawProductRepository.prototype, "findExpensiveProducts");
+    Query('SELECT * FROM "products" WHERE "product_id" = :id', {
+      result: "one",
+    })(RawProductRepository.prototype, "findOneProductRaw");
+    Query(
+      'SELECT COUNT(*) AS total FROM "products" WHERE "price" > :minPrice',
+      { result: "scalar" },
+    )(RawProductRepository.prototype, "countProductsRaw");
+    Query(
+      'UPDATE "products" SET "price" = "price" + :amount WHERE "price" < :amount',
+      { result: "execute" },
+    )(RawProductRepository.prototype, "raisePricesRaw");
 
     const repository = createPostgresqlDerivedQueryRepository(
       Object.create(RawProductRepository.prototype),
@@ -667,16 +736,18 @@ describe("PostgreSQL adapter", () => {
       },
     };
 
-    abstract class RawProductRepository extends NPARepository<PgProduct, number> {}
+    abstract class RawProductRepository extends NPARepository<
+      PgProduct,
+      number
+    > {}
 
     Query('SELECT * FROM "products"', { result: "many" })(
       RawProductRepository.prototype,
       "findProductsRaw",
     );
-    Query('SELECT * FROM "products" WHERE "product_id" = :id', { result: "one" })(
-      RawProductRepository.prototype,
-      "findOneProductRaw",
-    );
+    Query('SELECT * FROM "products" WHERE "product_id" = :id', {
+      result: "one",
+    })(RawProductRepository.prototype, "findOneProductRaw");
     Query("SELECT COUNT_EMPTY AS total", { result: "scalar" })(
       RawProductRepository.prototype,
       "countEmptyRaw",
@@ -703,31 +774,31 @@ describe("PostgreSQL adapter", () => {
   });
 
   test("binds raw PostgreSQL named and positional parameters safely", () => {
-    expect(compilePostgresqlRawQuery(
+    expect(
+      compilePostgresqlRawQuery(
         'SELECT :id::int AS id, \':id\' AS literal WHERE "owner_id" = :id AND "status" = :status',
         [7, "active"],
         "findRaw",
-      )).toEqual({
-        text:
-          'SELECT $1::int AS id, \':id\' AS literal WHERE "owner_id" = $1 AND "status" = $2',
-        values: [7, "active"],
-      });
+      ),
+    ).toEqual({
+      text: 'SELECT $1::int AS id, \':id\' AS literal WHERE "owner_id" = $1 AND "status" = $2',
+      values: [7, "active"],
+    });
 
-    expect(compilePostgresqlRawQuery(
+    expect(
+      compilePostgresqlRawQuery(
         "SELECT ? AS value, '?' AS literal",
         [1],
         "findRaw",
-      )).toEqual({
-        text: "SELECT $1 AS value, '?' AS literal",
-        values: [1],
-      });
+      ),
+    ).toEqual({
+      text: "SELECT $1 AS value, '?' AS literal",
+      values: [1],
+    });
 
     expect(() =>
-        compilePostgresqlRawQuery(
-          "SELECT :id, :status",
-          [7],
-          "findRaw",
-        )).toThrow(/uses named parameter/);
+      compilePostgresqlRawQuery("SELECT :id, :status", [7], "findRaw"),
+    ).toThrow(/uses named parameter/);
   });
 
   test("runs save, insert, updateById, and deleteById through a PostgreSQL queryable", async () => {
@@ -815,8 +886,7 @@ describe("PostgreSQL adapter", () => {
 
     expect(calls).toEqual([
       {
-        text:
-          'INSERT INTO "users" ("name", "created_at") VALUES ($1, $2) RETURNING *',
+        text: 'INSERT INTO "users" ("name", "created_at") VALUES ($1, $2) RETURNING *',
         values: ["kim", 3],
       },
       {
@@ -836,8 +906,7 @@ describe("PostgreSQL adapter", () => {
         values: [1],
       },
       {
-        text:
-          'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
+        text: 'SELECT EXISTS(SELECT 1 FROM "users" WHERE "id" = $1) AS "exists"',
         values: [1],
       },
       {
@@ -877,11 +946,13 @@ describe("PostgreSQL adapter", () => {
         }
 
         return {
-          rows: [{
-            product_id: 1,
-            product_name: values[0],
-            updated_at: values[1],
-          }],
+          rows: [
+            {
+              product_id: 1,
+              product_name: values[0],
+              updated_at: values[1],
+            },
+          ],
           rowCount: 1,
         };
       },
@@ -896,13 +967,11 @@ describe("PostgreSQL adapter", () => {
 
     expect(calls).toEqual([
       {
-        text:
-          'INSERT INTO "products" ("product_name") VALUES ($1) RETURNING *',
+        text: 'INSERT INTO "products" ("product_name") VALUES ($1) RETURNING *',
         values: ["desk"],
       },
       {
-        text:
-          'UPDATE "products" SET "product_name" = $1, "updated_at" = $2 WHERE "product_id" = $3 RETURNING *',
+        text: 'UPDATE "products" SET "product_name" = $1, "updated_at" = $2 WHERE "product_id" = $3 RETURNING *',
         values: ["chair", expect.any(Date), 1],
       },
     ]);
@@ -915,7 +984,13 @@ describe("PostgreSQL adapter", () => {
         calls.push({ text, values });
 
         return {
-          rows: [{ product_id: values.at(-2) ?? values.at(-1), product_name: values[0], lock_version: 1 }],
+          rows: [
+            {
+              product_id: values.at(-2) ?? values.at(-1),
+              product_name: values[0],
+              lock_version: 1,
+            },
+          ],
           rowCount: 1,
         };
       },
@@ -934,13 +1009,11 @@ describe("PostgreSQL adapter", () => {
 
     expect(calls).toEqual([
       {
-        text:
-          'UPDATE "products" SET "product_name" = $1, "lock_version" = "lock_version" + 1 WHERE "product_id" = $2 AND "lock_version" = $3 RETURNING *',
+        text: 'UPDATE "products" SET "product_name" = $1, "lock_version" = "lock_version" + 1 WHERE "product_id" = $2 AND "lock_version" = $3 RETURNING *',
         values: ["chair", 1, 0],
       },
       {
-        text:
-          'UPDATE "products" SET "product_name" = $1 WHERE "product_id" = $2 RETURNING *',
+        text: 'UPDATE "products" SET "product_name" = $1 WHERE "product_id" = $2 RETURNING *',
         values: ["desk", 2],
       },
     ]);
@@ -953,15 +1026,27 @@ describe("PostgreSQL adapter", () => {
         calls.push({ text, values });
 
         if (text === 'SELECT * FROM "members" WHERE "member_id" = $1 LIMIT 1') {
-          return { rows: [{ member_id: values[0], name: "kim", team_id: 2 }], rowCount: 1 };
+          return {
+            rows: [{ member_id: values[0], name: "kim", team_id: 2 }],
+            rowCount: 1,
+          };
         }
 
         if (text === 'SELECT * FROM "teams" WHERE "team_id" IN ($1)') {
-          return { rows: [{ team_id: 2, label: "core", organization_id: 3 }], rowCount: 1 };
+          return {
+            rows: [{ team_id: 2, label: "core", organization_id: 3 }],
+            rowCount: 1,
+          };
         }
 
-        if (text === 'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)') {
-          return { rows: [{ organization_id: 3, name: "platform" }], rowCount: 1 };
+        if (
+          text ===
+          'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)'
+        ) {
+          return {
+            rows: [{ organization_id: 3, name: "platform" }],
+            rowCount: 1,
+          };
         }
 
         if (text.includes('FROM "member_roles" j')) {
@@ -1046,15 +1131,27 @@ describe("PostgreSQL adapter", () => {
         calls.push({ text, values });
 
         if (text === 'SELECT * FROM "members" WHERE ("name" = $1)') {
-          return { rows: [{ member_id: 10, name: values[0], team_id: 2 }], rowCount: 1 };
+          return {
+            rows: [{ member_id: 10, name: values[0], team_id: 2 }],
+            rowCount: 1,
+          };
         }
 
         if (text === 'SELECT * FROM "teams" WHERE "team_id" IN ($1)') {
-          return { rows: [{ team_id: 2, label: "core", organization_id: 3 }], rowCount: 1 };
+          return {
+            rows: [{ team_id: 2, label: "core", organization_id: 3 }],
+            rowCount: 1,
+          };
         }
 
-        if (text === 'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)') {
-          return { rows: [{ organization_id: 3, name: "platform" }], rowCount: 1 };
+        if (
+          text ===
+          'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)'
+        ) {
+          return {
+            rows: [{ organization_id: 3, name: "platform" }],
+            rowCount: 1,
+          };
         }
 
         if (text.includes('FROM "member_roles" j')) {
@@ -1097,13 +1194,22 @@ describe("PostgreSQL adapter", () => {
 
         if (text.startsWith("UPDATE")) {
           return {
-            rows: [{ product_id: 1, product_name: values[0], price: values[1], lock_version: 1 }],
+            rows: [
+              {
+                product_id: 1,
+                product_name: values[0],
+                price: values[1],
+                lock_version: 1,
+              },
+            ],
             rowCount: 1,
           };
         }
 
         return {
-          rows: [{ product_id: 1, product_name: "desk", price: 10, lock_version: 0 }],
+          rows: [
+            { product_id: 1, product_name: "desk", price: 10, lock_version: 0 },
+          ],
           rowCount: 1,
         };
       },
@@ -1122,13 +1228,11 @@ describe("PostgreSQL adapter", () => {
 
     expect(calls).toEqual([
       {
-        text:
-          'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
+        text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
         values: [1],
       },
       {
-        text:
-          'UPDATE "products" SET "product_name" = $1, "price" = $2, "lock_version" = "lock_version" + 1 WHERE "product_id" = $3 AND "lock_version" = $4 RETURNING *',
+        text: 'UPDATE "products" SET "product_name" = $1, "price" = $2, "lock_version" = "lock_version" + 1 WHERE "product_id" = $3 AND "lock_version" = $4 RETURNING *',
         values: ["chair", 12, 1, 0],
       },
     ]);

@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -85,16 +85,16 @@ class Member {
   roles!: Role[];
 }
 
+const memberGraph = defineEntityGraph<Member>({
+  team: {
+    organization: true,
+  },
+  roles: true,
+});
+
 abstract class MemberGraphRepository extends NPARepository<Member, number> {
-  @EntityGraph({
-    relations: {
-      team: {
-        organization: true,
-      },
-      roles: true,
-    },
-  })
-  abstract findByName: (name: string) => Promise<Member[]>;
+  @EntityGraph(memberGraph)
+  abstract findByName: (name: string) => Promise<Loaded<Member, typeof memberGraph>[]>;
 }
 
 @Entity({ name: "broken_teams" })
