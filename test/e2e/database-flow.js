@@ -152,6 +152,8 @@ async function assertRepositoryContract(repository, options = {}) {
   assert.equal(await repository.existsById(firstId + 1000), false);
   assert.deepEqual(await repository.findById(firstId), first);
   assert.equal(await repository.findById(firstId + 1000), null);
+  assert.equal(await repository.findOneByName("missing product"), null);
+  assert.equal(await repository.deleteByStatus("missing"), 0);
 
   const updated = await repository.updateById(firstId, {
     name: "desk beta",
