@@ -3,7 +3,9 @@ import {
   EntityMetadata,
   getEntityMetadata,
   readRelationForeignKeyValue,
+  relationJoinColumnName,
   RelationKind,
+  RelationMetadata,
 } from "../entity";
 import { OptimisticLockError } from "./optimistic-lock-error";
 import { NPADirtyCheckAdapter, NPAManageEntityOptions } from "./types";
@@ -19,6 +21,10 @@ interface ManagedEntity<TEntity extends object = object> {
 
 export class PersistenceContext {
   private readonly managed = new Map<object, ManagedEntity>();
+  private identityMap = new WeakMap<
+    NPADirtyCheckAdapter,
+    WeakMap<object, Map<unknown, ManagedEntity>>
+  >();
 
   manage<TEntity extends object>(
     entity: TEntity,
@@ -41,17 +47,38 @@ export class PersistenceContext {
     }
 
     const metadata = getEntityMetadata(options.entity);
-    requirePrimaryColumn(metadata);
+    const primaryColumn = requirePrimaryColumn(metadata);
     installColumnAliases(entity, metadata);
+    const id = readColumnValue(entity, primaryColumn);
+    const existing = id === null || id === undefined
+      ? undefined
+      : this.findByIdentity(options.adapter, metadata.target, id);
 
-    this.managed.set(entity, {
+    if (existing) {
+      mergeManagedEntity(existing, entity);
+      return existing.entity as TEntity;
+    }
+
+    const managed = {
       adapter: options.adapter,
       entity,
       metadata,
       snapshot: snapshotEntity(entity, metadata),
-    });
+    };
+    this.managed.set(entity, managed);
+    this.rememberIdentity(options.adapter, metadata.target, id, managed);
 
     return entity;
+  }
+
+  findManagedById<TEntity extends object>(
+    id: unknown,
+    options: NPAManageEntityOptions<TEntity>,
+  ): TEntity | undefined {
+    const metadata = getEntityMetadata(options.entity);
+    return this.findByIdentity(options.adapter, metadata.target, id)?.entity as
+      | TEntity
+      | undefined;
   }
 
   manageMany<TEntity extends object>(
@@ -63,7 +90,7 @@ export class PersistenceContext {
 
   detach(entity: object | null | undefined): void {
     if (entity) {
-      this.managed.delete(entity);
+      this.detachManagedEntity(entity);
     }
   }
 
@@ -80,7 +107,7 @@ export class PersistenceContext {
       }
 
       if (Object.is(readColumnValue(managed.entity, primaryColumn), id)) {
-        this.managed.delete(entity);
+        this.detachManagedEntity(entity);
       }
     }
   }
@@ -97,13 +124,14 @@ export class PersistenceContext {
 
     for (const [entity, managed] of this.managed.entries()) {
       if (isSameManagedEntity(managed, metadata, options.adapter)) {
-        this.managed.delete(entity);
+        this.detachManagedEntity(entity);
       }
     }
   }
 
   clear(): void {
     this.managed.clear();
+    this.identityMap = new WeakMap();
   }
 
   async flush(): Promise<void> {
@@ -170,6 +198,54 @@ export class PersistenceContext {
       managed.snapshot = snapshotEntity(managed.entity, managed.metadata);
     }
   }
+
+  private findByIdentity(
+    adapter: NPADirtyCheckAdapter,
+    entity: object,
+    id: unknown,
+  ): ManagedEntity | undefined {
+    return this.identityMap.get(adapter)?.get(entity)?.get(id);
+  }
+
+  private rememberIdentity(
+    adapter: NPADirtyCheckAdapter,
+    entity: object,
+    id: unknown,
+    managed: ManagedEntity,
+  ): void {
+    if (id === null || id === undefined) {
+      return;
+    }
+
+    let entityMap = this.identityMap.get(adapter);
+
+    if (!entityMap) {
+      entityMap = new WeakMap();
+      this.identityMap.set(adapter, entityMap);
+    }
+
+    let idMap = entityMap.get(entity);
+
+    if (!idMap) {
+      idMap = new Map();
+      entityMap.set(entity, idMap);
+    }
+
+    idMap.set(id, managed);
+  }
+
+  private detachManagedEntity(entity: object): void {
+    const managed = this.managed.get(entity);
+
+    if (!managed) {
+      return;
+    }
+
+    const primaryColumn = requirePrimaryColumn(managed.metadata);
+    const id = readColumnValue(managed.entity, primaryColumn);
+    this.identityMap.get(managed.adapter)?.get(managed.metadata.target)?.delete(id);
+    this.managed.delete(entity);
+  }
 }
 
 function diffEntity<TEntity extends object>(
@@ -201,10 +277,7 @@ function diffEntity<TEntity extends object>(
       continue;
     }
 
-    const currentValue = readRelationForeignKeyValue(
-      readPropertyValue(entity, relation.propertyName),
-      relation,
-    );
+    const currentValue = readRelationForeignKey(entity, relation);
 
     if (currentValue === undefined) {
       continue;
@@ -231,14 +304,95 @@ function snapshotEntity(
       .filter((relation) => relation.kind === RelationKind.MANY_TO_ONE)
       .map((relation) => [
         relation.propertyName,
-        snapshotValue(
-          readRelationForeignKeyValue(
-            readPropertyValue(entity, relation.propertyName),
-            relation,
-          ),
-        ),
+        snapshotValue(readRelationForeignKey(entity, relation)),
       ] as const),
   ]);
+}
+
+function mergeManagedEntity<TEntity extends object>(
+  managed: ManagedEntity<TEntity>,
+  incoming: TEntity,
+): void {
+  const wasDirty =
+    Object.keys(diffEntity(managed.entity, managed.snapshot, managed.metadata))
+      .length > 0;
+
+  mergeLoadedRelations(managed.entity, incoming, managed.metadata);
+
+  if (wasDirty) {
+    return;
+  }
+
+  mergeDatabaseValues(managed.entity, incoming, managed.metadata);
+  managed.snapshot = snapshotEntity(managed.entity, managed.metadata);
+}
+
+function mergeDatabaseValues(
+  target: object,
+  source: object,
+  metadata: EntityMetadata,
+): void {
+  for (const column of metadata.columns) {
+    const value = readColumnValue(source, column);
+
+    if (value !== undefined) {
+      writeColumnValue(target, column, value);
+    }
+  }
+
+  for (const relation of metadata.relations) {
+    if (relation.kind !== RelationKind.MANY_TO_ONE) {
+      continue;
+    }
+
+    const value = readRelationForeignKey(source, relation);
+
+    if (value !== undefined) {
+      writeRawValue(target, relationJoinColumnName(relation), value);
+    }
+  }
+}
+
+function mergeLoadedRelations(
+  target: object,
+  source: object,
+  metadata: EntityMetadata,
+): void {
+  for (const relation of metadata.relations) {
+    const property = readOwnDataProperty(source, relation.propertyName);
+
+    if (!property.found) {
+      continue;
+    }
+
+    writeRawValue(target, relation.propertyName, property.value);
+  }
+}
+
+function readRelationForeignKey(
+  entity: object,
+  relation: RelationMetadata,
+): unknown {
+  const property = readOwnDataProperty(entity, relation.propertyName);
+
+  if (property.found) {
+    return readRelationForeignKeyValue(property.value, relation);
+  }
+
+  return readPropertyValue(entity, relationJoinColumnName(relation));
+}
+
+function readOwnDataProperty(
+  entity: object,
+  propertyName: string,
+): { found: true; value: unknown } | { found: false } {
+  const descriptor = Object.getOwnPropertyDescriptor(entity, propertyName);
+
+  if (!descriptor || !("value" in descriptor)) {
+    return { found: false };
+  }
+
+  return { found: true, value: descriptor.value };
 }
 
 function readPropertyValue(entity: object, propertyName: string): unknown {
@@ -268,6 +422,14 @@ function writeColumnValue(
   }
 
   record[column.columnName] = value;
+}
+
+function writeRawValue(
+  entity: object,
+  propertyName: string,
+  value: unknown,
+): void {
+  (entity as Record<string, unknown>)[propertyName] = value;
 }
 
 function installColumnAliases(

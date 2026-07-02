@@ -3,6 +3,7 @@ import {
   Column,
   Entity,
   Id,
+  ManyToOne,
   OptimisticLockError,
   PersistenceContext,
   UpdatedAt,
@@ -11,6 +12,15 @@ import {
 
 interface Profile {
   city: string;
+}
+
+@Entity({ name: "teams" })
+class Team {
+  @Id({ name: "team_id" })
+  id!: number;
+
+  @Column()
+  label!: string;
 }
 
 @Entity({ name: "users" })
@@ -26,6 +36,9 @@ class User {
 
   @Column()
   profile!: Profile;
+
+  @ManyToOne(() => Team, { joinColumn: "team_id" })
+  team!: Team;
 
   @Column({ name: "created_at" })
   createdAt!: Date;
@@ -52,6 +65,105 @@ interface DirtyUpdate<TEntity extends object> {
 }
 
 describe("persistence context", () => {
+  test("returns the same managed instance for the same entity id", () => {
+    const context = new PersistenceContext();
+    const adapter = {
+      async updateDirty(entity: User) {
+        return entity;
+      },
+    };
+    const first = {
+      user_id: 1,
+      full_name: "kim",
+      active: true,
+    };
+    const second = {
+      user_id: 1,
+      full_name: "lee",
+      active: false,
+    };
+
+    const managedFirst = context.manage<User>(first as unknown as User, {
+      entity: User,
+      adapter,
+    });
+    const managedSecond = context.manage<User>(second as unknown as User, {
+      entity: User,
+      adapter,
+    });
+
+    expect(managedSecond).toBe(managedFirst);
+    expect(context.findManagedById(1, { entity: User, adapter })).toBe(managedFirst);
+    expect(managedSecond.name).toEqual("lee");
+    expect(managedSecond.active).toEqual(false);
+  });
+
+  test("keeps dirty scalar values while enriching loaded relations", async () => {
+    const updates: DirtyUpdate<User>[] = [];
+    const context = new PersistenceContext();
+    const adapter = {
+      async updateDirty(_entity: User, id: unknown, patch: Partial<User>) {
+        updates.push({ id, patch });
+        return _entity;
+      },
+    };
+    const managed = context.manage<User>(
+      {
+        user_id: 2,
+        full_name: "kim",
+        active: true,
+        team_id: 10,
+      } as unknown as User,
+      { entity: User, adapter },
+    );
+
+    managed.name = "dirty";
+
+    const same = context.manage<User>(
+      {
+        user_id: 2,
+        full_name: "database",
+        active: false,
+        team_id: 10,
+        team: { team_id: 10, label: "platform" },
+      } as unknown as User,
+      { entity: User, adapter },
+    );
+
+    expect(same).toBe(managed);
+    expect(managed.name).toEqual("dirty");
+    expect(managed.active).toEqual(true);
+    expect(managed.team).toEqual({ team_id: 10, label: "platform" });
+
+    await context.flush();
+
+    expect(updates).toEqual([{ id: 2, patch: { name: "dirty" } }]);
+  });
+
+  test("removes identity entries when managed entities are detached", () => {
+    const context = new PersistenceContext();
+    const adapter = {
+      async updateDirty(entity: User) {
+        return entity;
+      },
+    };
+    const first = { user_id: 3, full_name: "kim", active: true };
+    const second = { user_id: 3, full_name: "lee", active: false };
+
+    const managedFirst = context.manage<User>(first as unknown as User, {
+      entity: User,
+      adapter,
+    });
+    context.detachById(3, { entity: User, adapter });
+    const managedSecond = context.manage<User>(second as unknown as User, {
+      entity: User,
+      adapter,
+    });
+
+    expect(managedSecond).not.toBe(managedFirst);
+    expect(managedSecond.name).toEqual("lee");
+  });
+
   test("tracks managed entity changes and flushes property-name patches", async () => {
     const updates: DirtyUpdate<User>[] = [];
     const context = new PersistenceContext();

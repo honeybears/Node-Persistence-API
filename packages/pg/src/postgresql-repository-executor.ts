@@ -117,6 +117,13 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   execute = this.executeDerivedQuery;
 
   findById = async (id: TId, load?: NPALoadOptions<TEntity>): Promise<TEntity | null> => {
+    const managed = this.findManagedById(id);
+
+    if (managed) {
+      const loaded = await this.loadRelations(this.attachLazy([managed]), load);
+      return this.manage(loaded[0] ?? null);
+    }
+
     const query = compilePostgresqlFindById(id, this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
@@ -297,6 +304,20 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return attachPostgresqlLazyRelations(entities, {
       entity: this.getEntityTarget(),
       queryable: this.options.queryable,
+    });
+  }
+
+  private findManagedById(id: TId): TEntity | undefined {
+    const context = getCurrentPersistenceContext();
+    const entityTarget = this.getEntityTarget();
+
+    if (!context || !entityTarget) {
+      return undefined;
+    }
+
+    return context.findManagedById(id, {
+      adapter: this.dirtyCheckAdapter,
+      entity: entityTarget,
     });
   }
 

@@ -130,6 +130,13 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   };
 
   findById = async (id: TId, load?: NPALoadOptions<TEntity>): Promise<TEntity | null> => {
+    const managed = this.findManagedById(id);
+
+    if (managed) {
+      const loaded = await this.loadRelations(this.attachLazy([managed]), load);
+      return this.manage(loaded[0] ?? null);
+    }
+
     const row = await this.findByIdRow(id);
     const loaded = await this.loadRelations(row ? [row] : [], load);
 
@@ -327,6 +334,20 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       entity: this.getEntityTarget(),
       preferExecute: this.options.preferExecute,
       queryable: this.options.queryable,
+    });
+  }
+
+  private findManagedById(id: TId): TEntity | undefined {
+    const context = getCurrentPersistenceContext();
+    const entityTarget = this.getEntityTarget();
+
+    if (!context || !entityTarget) {
+      return undefined;
+    }
+
+    return context.findManagedById(id, {
+      adapter: this.dirtyCheckAdapter,
+      entity: entityTarget,
     });
   }
 
