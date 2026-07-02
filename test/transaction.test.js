@@ -24,6 +24,10 @@ class RecordingTransactionManager extends AbstractTransactionManager {
     return this.getCurrentTransactionResource()?.id;
   }
 
+  currentOptions() {
+    return this.getCurrentTransactionResource()?.options;
+  }
+
   acquireTransactionResource(options) {
     const resource = { id: ++this.nextId, options };
     this.calls.push(`acquire:${resource.id}`);
@@ -163,6 +167,42 @@ test("joins an existing required transaction and starts REQUIRES_NEW separately"
     "begin:2:none",
     "commit:2",
     "release:2",
+    "commit:1",
+    "release:1",
+  ]);
+});
+
+test("keeps joined required transaction options scoped to the outer resource", async () => {
+  const manager = new RecordingTransactionManager();
+
+  await manager.transactional(
+    async () => {
+      assert.deepEqual(manager.currentOptions(), {
+        isolation: NPATransactionIsolation.READ_COMMITTED,
+      });
+
+      await manager.transactional(
+        async () => {
+          assert.deepEqual(manager.currentOptions(), {
+            isolation: NPATransactionIsolation.READ_COMMITTED,
+          });
+        },
+        {
+          isolation: NPATransactionIsolation.SERIALIZABLE,
+          readOnly: true,
+        },
+      );
+
+      assert.deepEqual(manager.currentOptions(), {
+        isolation: NPATransactionIsolation.READ_COMMITTED,
+      });
+    },
+    { isolation: NPATransactionIsolation.READ_COMMITTED },
+  );
+
+  assert.deepEqual(manager.calls, [
+    "acquire:1",
+    "begin:1:READ_COMMITTED",
     "commit:1",
     "release:1",
   ]);
