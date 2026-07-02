@@ -103,6 +103,16 @@ for (const adapter of databaseAdapters) {
       assert.deepEqual(indexes.get(statusIndexName), { unique: false });
       assert.deepEqual(indexes.get(skuUniqueIndexName), { unique: true });
 
+      const foreignKeys = await readForeignKeys(adapter, queryable, joinTableName);
+      assert.deepEqual(foreignKeys.get("category_id"), {
+        targetTable: categoryTableName,
+        targetColumn: "category_id",
+      });
+      assert.deepEqual(foreignKeys.get("product_id"), {
+        targetTable: tableName,
+        targetColumn: "product_id",
+      });
+
       const third = runCli(["db", "push", "--config", "npa.config.mjs"], root);
       assert.equal(third.status, 0, third.stderr);
       assert.match(third.stdout, /Database schema is up to date/);
@@ -119,6 +129,7 @@ for (const adapter of databaseAdapters) {
       const tableName = uniqueTableName(`${adapter.tablePrefix}_migrate_file`);
       const categoryTableName = uniqueTableName(`${adapter.tablePrefix}_migrate_category`);
       const joinTableName = uniqueTableName(`${adapter.tablePrefix}_migrate_join`);
+      const auditTableName = uniqueTableName(`${adapter.tablePrefix}_migrate_audit`);
       const statusIndexName = uniqueTableName(`${adapter.tablePrefix}_migrate_status_idx`);
       const skuUniqueIndexName = uniqueTableName(`${adapter.tablePrefix}_migrate_sku_uidx`);
       const container = await startContainerOrSkip(t, adapter.createContainer());
@@ -133,6 +144,7 @@ for (const adapter of databaseAdapters) {
         try {
           if (queryable) {
             for (const table of [
+              auditTableName,
               joinTableName,
               categoryTableName,
               tableName,
@@ -201,6 +213,37 @@ for (const adapter of databaseAdapters) {
         queryable,
       });
       await assertRepositoryContract(repository);
+
+      writePendingMigration(root, "99999999999991_create_audit", [
+        createAuditTableSql(adapter, auditTableName),
+      ]);
+      writePendingMigration(root, "99999999999992_add_audit_reviewed", [
+        addAuditReviewedColumnSql(adapter, auditTableName),
+      ]);
+
+      const pendingPreview = runCli(
+        ["migrate", "deploy", "--dry-run", "--config", "npa.config.mjs"],
+        root,
+      );
+      assert.equal(pendingPreview.status, 0, pendingPreview.stderr);
+      assert.match(pendingPreview.stdout, /Pending migrations: 2/);
+      assert.equal(
+        pendingPreview.stdout.indexOf("99999999999991_create_audit") <
+          pendingPreview.stdout.indexOf("99999999999992_add_audit_reviewed"),
+        true,
+      );
+
+      const pendingDeploy = runCli(["migrate", "deploy", "--config", "npa.config.mjs"], root);
+      assert.equal(pendingDeploy.status, 0, pendingDeploy.stderr);
+      assert.match(pendingDeploy.stdout, /Applied 2 migration\(s\)/);
+      assert.deepEqual(
+        await readColumnNames(adapter, queryable, auditTableName),
+        ["audit_id", "message", "reviewed"],
+      );
+
+      const redeploy = runCli(["migrate", "deploy", "--config", "npa.config.mjs"], root);
+      assert.equal(redeploy.status, 0, redeploy.stderr);
+      assert.match(redeploy.stdout, /No pending migrations \(3 checked\)/);
     },
   );
 }
@@ -276,6 +319,43 @@ export class Category {
   );
 }
 
+function writePendingMigration(root, name, statements) {
+  const migrationRoot = path.join(root, "npa", "migrations", name);
+  fs.mkdirSync(migrationRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(migrationRoot, "migration.sql"),
+    `${statements.map((statement) => statement.trim()).join(";\n\n")};\n`,
+    "utf8",
+  );
+}
+
+function createAuditTableSql(adapter, tableName) {
+  const table = adapter.quoteIdentifier(tableName);
+
+  if (adapter.adapterName === "mysql") {
+    return `
+      CREATE TABLE ${table} (
+        audit_id INT AUTO_INCREMENT PRIMARY KEY,
+        message VARCHAR(255) NOT NULL
+      )
+    `;
+  }
+
+  return `
+    CREATE TABLE ${table} (
+      audit_id SERIAL PRIMARY KEY,
+      message TEXT NOT NULL
+    )
+  `;
+}
+
+function addAuditReviewedColumnSql(adapter, tableName) {
+  return `
+    ALTER TABLE ${adapter.quoteIdentifier(tableName)}
+    ADD COLUMN reviewed BOOLEAN NOT NULL DEFAULT FALSE
+  `;
+}
+
 async function readColumnNames(adapter, queryable, tableName) {
   const rows = await queryRows(
     queryable,
@@ -330,6 +410,50 @@ async function readIndexes(adapter, queryable, tableName) {
   }
 
   return indexes;
+}
+
+async function readForeignKeys(adapter, queryable, tableName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+        "SELECT kcu.column_name AS \"columnName\",",
+        "  ccu.table_name AS \"targetTable\",",
+        "  ccu.column_name AS \"targetColumn\"",
+        "FROM information_schema.table_constraints tc",
+        "JOIN information_schema.key_column_usage kcu",
+        "  ON tc.constraint_name = kcu.constraint_name",
+        "  AND tc.table_schema = kcu.table_schema",
+        "JOIN information_schema.constraint_column_usage ccu",
+        "  ON ccu.constraint_name = tc.constraint_name",
+        "  AND ccu.constraint_schema = tc.constraint_schema",
+        "WHERE tc.constraint_type = 'FOREIGN KEY'",
+        "  AND tc.table_schema = 'public'",
+        "  AND tc.table_name = $1",
+        "ORDER BY kcu.column_name",
+      ].join("\n")
+      : [
+        "SELECT COLUMN_NAME AS columnName,",
+        "  REFERENCED_TABLE_NAME AS targetTable,",
+        "  REFERENCED_COLUMN_NAME AS targetColumn",
+        "FROM information_schema.KEY_COLUMN_USAGE",
+        "WHERE TABLE_SCHEMA = DATABASE()",
+        "  AND TABLE_NAME = ?",
+        "  AND REFERENCED_TABLE_NAME IS NOT NULL",
+        "ORDER BY COLUMN_NAME",
+      ].join("\n"),
+    [tableName],
+  );
+  const foreignKeys = new Map();
+
+  for (const row of rows) {
+    foreignKeys.set(row.columnName, {
+      targetTable: row.targetTable,
+      targetColumn: row.targetColumn,
+    });
+  }
+
+  return foreignKeys;
 }
 
 async function queryRows(queryable, sql, values) {
