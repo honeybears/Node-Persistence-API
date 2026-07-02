@@ -164,8 +164,23 @@ Supported query modifiers include `Distinct`, `IgnoreCase`, `AllIgnoreCase`,
 Load relations explicitly on base reads:
 
 ```ts
-const user = await users.findById(1, { relations: ['team', 'roles'] });
-const teams = await teamRepository.findAll({ relations: ['members'] });
+const user = await users.findById(1, {
+  relations: {
+    roles: true,
+    team: {
+      organization: true,
+    },
+  },
+});
+const teams = await teamRepository.findAll({ relations: { members: true } });
+```
+
+Relation fields are lazy-loadable when they were not loaded explicitly:
+
+```ts
+const user = await users.findById(1);
+const team = await user.team;
+const roles = await user.roles;
 ```
 
 Derived query methods can also filter on relation fields. NPA joins relation
@@ -309,8 +324,8 @@ const users = npa.get(UserRepository);
 
 await users.insert({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
-await users.findById(1, { relations: ['team', 'roles'] });
-await users.findAll({ relations: ['team'] });
+await users.findById(1, { relations: { roles: true, team: true } });
+await users.findAll({ relations: { team: true } });
 await users.existsById(1);
 await users.count();
 await users.updateById(1, { name: 'park' });
@@ -341,8 +356,8 @@ const users = npa.get(UserRepository);
 
 await users.insert({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
-await users.findById(1, { relations: ['team', 'roles'] });
-await users.findAll({ relations: ['team'] });
+await users.findById(1, { relations: { roles: true, team: true } });
+await users.findAll({ relations: { team: true } });
 await users.existsById(1);
 await users.count();
 await users.updateById(1, { name: 'park' });

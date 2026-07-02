@@ -3,6 +3,7 @@ import {
   EntityMetadata,
   getEntityMetadata,
   NPALoadOptions,
+  NPARelationLoadTree,
   readEntityPrimaryValue,
   relationJoinColumnName,
   RelationKind,
@@ -29,15 +30,79 @@ export async function loadPostgresqlRelations<TEntity extends object>(
   }
 
   const metadata = getEntityMetadata(options.entity);
-  const relations = selectRelations(metadata, options.load.relations);
+  const relationSelections = selectRelations(metadata, options.load.relations);
 
-  for (const relation of relations) {
+  for (const { relation, nested } of relationSelections) {
+    let loaded: object[];
+
     if (relation.kind === RelationKind.MANY_TO_ONE) {
-      await loadManyToOne(entities, metadata, relation, options.queryable);
+      loaded = await loadManyToOne(entities, metadata, relation, options.queryable);
     } else if (relation.kind === RelationKind.ONE_TO_MANY) {
-      await loadOneToMany(entities, metadata, relation, options.queryable);
+      loaded = await loadOneToMany(entities, metadata, relation, options.queryable);
     } else if (relation.kind === RelationKind.MANY_TO_MANY) {
-      await loadManyToMany(entities, metadata, relation, options.queryable);
+      loaded = await loadManyToMany(entities, metadata, relation, options.queryable);
+    } else {
+      loaded = [];
+    }
+
+    if (nested) {
+      await loadPostgresqlRelations(loaded, {
+        entity: relation.target() as new (...args: any[]) => object,
+        load: { relations: nested },
+        queryable: options.queryable,
+      });
+    }
+  }
+
+  return entities;
+}
+
+export function attachPostgresqlLazyRelations<TEntity extends object>(
+  entities: TEntity[],
+  options: {
+    entity?: new (...args: any[]) => TEntity;
+    queryable: PostgresqlQueryable;
+  },
+): TEntity[] {
+  if (entities.length === 0) {
+    return entities;
+  }
+
+  if (!options.entity) {
+    return entities;
+  }
+
+  const metadata = getEntityMetadata(options.entity);
+
+  for (const entity of entities) {
+    for (const relation of metadata.relations) {
+      if (Object.prototype.hasOwnProperty.call(entity, relation.propertyName)) {
+        continue;
+      }
+
+      let cached: Promise<unknown> | undefined;
+      Object.defineProperty(entity, relation.propertyName, {
+        configurable: true,
+        enumerable: false,
+        get() {
+          cached ??= loadPostgresqlRelations([entity], {
+            entity: options.entity,
+            load: { relations: [relation.propertyName] },
+            queryable: options.queryable,
+          }).then(() => readValue(entity, relation.propertyName));
+
+          return cached;
+        },
+        set(value: unknown) {
+          cached = Promise.resolve(value);
+          Object.defineProperty(entity, relation.propertyName, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true,
+          });
+        },
+      });
     }
   }
 
@@ -46,13 +111,34 @@ export async function loadPostgresqlRelations<TEntity extends object>(
 
 function selectRelations(
   metadata: EntityMetadata,
-  requested: true | string[],
-): RelationMetadata[] {
+  requested: NonNullable<NPALoadOptions["relations"]>,
+): Array<{ relation: RelationMetadata; nested?: NPARelationLoadTree }> {
   if (requested === true) {
-    return metadata.relations;
+    return metadata.relations.map((relation) => ({ relation }));
   }
 
-  return requested.map((propertyName) => {
+  if (Array.isArray(requested)) {
+    return requested.map((propertyName) => {
+      const relation = findRelation(metadata, propertyName);
+
+      return { relation };
+    });
+  }
+
+  return Object.entries(requested).map(([propertyName, nested]) => {
+    const relation = findRelation(metadata, propertyName);
+
+    return {
+      relation,
+      nested: nested === true ? undefined : nested as NPARelationLoadTree,
+    };
+  });
+}
+
+function findRelation(
+  metadata: EntityMetadata,
+  propertyName: string,
+): RelationMetadata {
     const relation = metadata.relations.find((candidate) =>
       candidate.propertyName === propertyName,
     );
@@ -62,7 +148,13 @@ function selectRelations(
     }
 
     return relation;
-  });
+}
+
+function flattenRelationValues(entities: object[], relation: RelationMetadata): object[] {
+  return entities.flatMap((entity) => {
+    const value = readValue(entity, relation.propertyName);
+    return Array.isArray(value) ? value : value ? [value] : [];
+  }) as object[];
 }
 
 async function loadManyToOne<TEntity extends object>(
@@ -70,7 +162,7 @@ async function loadManyToOne<TEntity extends object>(
   _metadata: EntityMetadata,
   relation: RelationMetadata,
   queryable: PostgresqlQueryable,
-): Promise<void> {
+): Promise<object[]> {
   const targetMetadata = getEntityMetadata(relation.target());
   const targetPrimary = requirePrimaryColumn(targetMetadata);
   const joinColumn = relationJoinColumnName(relation);
@@ -80,7 +172,7 @@ async function loadManyToOne<TEntity extends object>(
     for (const entity of entities) {
       writeValue(entity, relation.propertyName, null);
     }
-    return;
+    return [];
   }
 
   const rows = await selectRowsByColumn(
@@ -95,6 +187,8 @@ async function loadManyToOne<TEntity extends object>(
     const id = readValue(entity, joinColumn);
     writeValue(entity, relation.propertyName, rowById.get(id) ?? null);
   }
+
+  return flattenRelationValues(entities, relation);
 }
 
 async function loadOneToMany<TEntity extends object>(
@@ -102,7 +196,7 @@ async function loadOneToMany<TEntity extends object>(
   metadata: EntityMetadata,
   relation: RelationMetadata,
   queryable: PostgresqlQueryable,
-): Promise<void> {
+): Promise<object[]> {
   if (!relation.mappedBy) {
     throw new Error(`@OneToMany ${metadata.target.name}.${relation.propertyName} requires mappedBy.`);
   }
@@ -125,6 +219,8 @@ async function loadOneToMany<TEntity extends object>(
     const id = readEntityPrimaryValue(entity, metadata);
     writeValue(entity, relation.propertyName, rowsBySourceId.get(id) ?? []);
   }
+
+  return flattenRelationValues(entities, relation);
 }
 
 async function loadManyToMany<TEntity extends object>(
@@ -132,12 +228,12 @@ async function loadManyToMany<TEntity extends object>(
   metadata: EntityMetadata,
   relation: RelationMetadata,
   queryable: PostgresqlQueryable,
-): Promise<void> {
+): Promise<object[]> {
   const targetMetadata = getEntityMetadata(relation.target());
   const sourceIds = uniqueValues(entities.map((entity) => readEntityPrimaryValue(entity, metadata)));
 
   if (sourceIds.length === 0) {
-    return;
+    return [];
   }
 
   const targetPrimary = requirePrimaryColumn(targetMetadata);
@@ -161,6 +257,8 @@ async function loadManyToMany<TEntity extends object>(
     const id = readEntityPrimaryValue(entity, metadata);
     writeValue(entity, relation.propertyName, rowsBySourceId.get(id) ?? []);
   }
+
+  return flattenRelationValues(entities, relation);
 }
 
 async function selectRowsByColumn(

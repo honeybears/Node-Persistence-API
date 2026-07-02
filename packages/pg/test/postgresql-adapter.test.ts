@@ -945,7 +945,11 @@ describe("PostgreSQL adapter", () => {
         }
 
         if (text === 'SELECT * FROM "teams" WHERE "team_id" IN ($1)') {
-          return { rows: [{ team_id: 2, label: "core" }], rowCount: 1 };
+          return { rows: [{ team_id: 2, label: "core", organization_id: 3 }], rowCount: 1 };
+        }
+
+        if (text === 'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)') {
+          return { rows: [{ organization_id: 3, name: "platform" }], rowCount: 1 };
         }
 
         if (text.includes('FROM "member_roles" j')) {
@@ -984,8 +988,31 @@ describe("PostgreSQL adapter", () => {
       { entity: PgTeam, queryable: asPgQueryable(queryable) },
     );
 
-    const member = await members.findById(10, { relations: ["team", "roles"] });
-    expect(member.team).toEqual({ team_id: 2, label: "core" });
+    const lazyMember = await members.findById(10);
+    expect(await lazyMember.team).toEqual({
+      organization_id: 3,
+      team_id: 2,
+      label: "core",
+    });
+    expect(await lazyMember.roles).toEqual([
+      { role_id: 7, name: "admin" },
+      { role_id: 8, name: "writer" },
+    ]);
+
+    const member = await members.findById(10, {
+      relations: {
+        roles: true,
+        team: {
+          organization: true,
+        },
+      },
+    });
+    expect(member.team).toEqual({
+      organization: { organization_id: 3, name: "platform" },
+      organization_id: 3,
+      team_id: 2,
+      label: "core",
+    });
     expect(member.roles).toEqual([
       { role_id: 7, name: "admin" },
       { role_id: 8, name: "writer" },
@@ -997,7 +1024,7 @@ describe("PostgreSQL adapter", () => {
       { member_id: 11, name: "lee", team_id: 2 },
     ]);
 
-    expect(calls.length).toEqual(5);
+    expect(calls.length).toEqual(9);
   });
 
   test("flushes dirty managed entities through a PostgreSQL repository", async () => {

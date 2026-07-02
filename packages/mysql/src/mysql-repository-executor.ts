@@ -4,6 +4,7 @@ import {
   type EntityTarget,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
+  NPALoadOptions,
   RepositoryMethodExecutor,
   RepositoryRawQueryExecutor,
   withUpdatedAtTimestamp,
@@ -22,7 +23,10 @@ import {
 } from "./mysql-crud-compiler";
 import { compileMysqlQuery } from "./mysql-query-compiler";
 import { compileMysqlRawQuery } from "./mysql-raw-query";
-import { loadMysqlRelations } from "./mysql-relation-loader";
+import {
+  attachMysqlLazyRelations,
+  loadMysqlRelations,
+} from "./mysql-relation-loader";
 import { executeMysqlQuery } from "./mysql-result";
 import { MysqlRepositoryOptions } from "./types";
 
@@ -50,7 +54,8 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
         return null;
       }
 
-      return this.findByIdRow(id as TId);
+      const row = await this.findByIdRow(id as TId);
+      return row ? this.attachLazy([row])[0] : null;
     },
   };
 
@@ -68,9 +73,9 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     switch (invocation.query.action) {
       case "find":
-        return this.manageMany(result.rows as TEntity[]);
+        return this.manageMany(this.attachLazy(result.rows as TEntity[]));
       case "findOne":
-        return this.manage((result.rows[0] as TEntity | undefined) ?? null);
+        return this.manage(this.attachLazy(result.rows as TEntity[])[0] ?? null);
       case "exists":
         return Boolean(result.rows[0]?.exists);
       case "count":
@@ -108,14 +113,14 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
   };
 
-  findById = async (id: TId, load?: { relations?: true | string[] }): Promise<TEntity | null> => {
+  findById = async (id: TId, load?: NPALoadOptions<TEntity>): Promise<TEntity | null> => {
     const row = await this.findByIdRow(id);
     const loaded = await this.loadRelations(row ? [row] : [], load);
 
-    return this.manage(loaded[0] ?? null);
+    return this.manage(this.attachLazy(loaded)[0] ?? null);
   };
 
-  findAll = async (load?: { relations?: true | string[] }): Promise<TEntity[]> => {
+  findAll = async (load?: NPALoadOptions<TEntity>): Promise<TEntity[]> => {
     const query = compileMysqlFindAll(this.options);
     const result = await executeMysqlQuery<TEntity>(
       this.options,
@@ -123,7 +128,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       query.values,
     );
 
-    return this.manageMany(await this.loadRelations(result.rows, load));
+    return this.manageMany(this.attachLazy(await this.loadRelations(result.rows, load)));
   };
 
   existsById = async (id: TId): Promise<boolean> => {
@@ -165,10 +170,10 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     const id = getMysqlPrimaryKeyValue(entity, this.options) ?? result.insertId;
 
     if (id === null || id === undefined) {
-      return entity;
+      return this.attachLazy([entity])[0];
     }
 
-    return this.manage((await this.findByIdRow(id as TId)) ?? entity);
+    return this.manage(this.attachLazy([(await this.findByIdRow(id as TId)) ?? entity])[0]);
   };
 
   update = async (entity: TEntity): Promise<TEntity | null> => {
@@ -203,7 +208,8 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       return null;
     }
 
-    return this.manage(await this.findByIdRow(id));
+    const row = await this.findByIdRow(id);
+    return this.manage(row ? this.attachLazy([row])[0] : null);
   };
 
   delete = async (entityOrId: TEntity | TId): Promise<number> => {
@@ -242,10 +248,10 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   ): unknown {
     switch (query.result) {
       case "many":
-        return query.managed ? this.manageMany(rows) : rows;
+        return query.managed ? this.manageMany(this.attachLazy(rows)) : rows;
       case "one": {
         const row = rows[0] ?? null;
-        return query.managed ? this.manage(row) : row;
+        return query.managed ? this.manage(row ? this.attachLazy([row])[0] : null) : row;
       }
       case "scalar":
         return firstColumn(rows[0] ?? null);
@@ -300,9 +306,17 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     });
   }
 
+  private attachLazy(entities: TEntity[]): TEntity[] {
+    return attachMysqlLazyRelations(entities.filter((entity) => entity), {
+      entity: this.getEntityTarget(),
+      preferExecute: this.options.preferExecute,
+      queryable: this.options.queryable,
+    });
+  }
+
   private async loadRelations(
     entities: TEntity[],
-    load: { relations?: true | string[] } | undefined,
+    load: NPALoadOptions<TEntity> | undefined,
   ): Promise<TEntity[]> {
     return loadMysqlRelations(entities, {
       entity: this.getEntityTarget(),

@@ -21,8 +21,19 @@ export interface RepositoryRawQueryExecutor<TResult = unknown> {
 }
 
 export interface NPALoadOptions<TEntity extends object = object> {
-  relations?: true | Array<Extract<keyof TEntity, string> | string>;
+  relations?: true | Array<Extract<keyof TEntity, string> | string> | NPARelationLoadTree<TEntity>;
 }
+
+export type NPARelationLoadTree<TEntity extends object = object> = {
+  [K in Extract<keyof TEntity, string>]?: true | NPARelationLoadTree<NPAUnwrappedRelation<TEntity[K]>>;
+};
+
+type NPAUnwrappedRelation<TValue> =
+  TValue extends Promise<infer TResolved>
+    ? NPAUnwrappedRelation<TResolved>
+    : TValue extends readonly (infer TItem)[]
+      ? Extract<TItem, object>
+      : Extract<TValue, object>;
 
 export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findById(

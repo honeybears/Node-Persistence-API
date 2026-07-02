@@ -4,6 +4,7 @@ import {
   type EntityTarget,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
+  NPALoadOptions,
   RepositoryMethodExecutor,
   RepositoryRawQueryExecutor,
   withUpdatedAtTimestamp,
@@ -22,7 +23,10 @@ import {
 } from "./postgresql-crud-compiler";
 import { compilePostgresqlQuery } from "./postgresql-query-compiler";
 import { compilePostgresqlRawQuery } from "./postgresql-raw-query";
-import { loadPostgresqlRelations } from "./postgresql-relation-loader";
+import {
+  attachPostgresqlLazyRelations,
+  loadPostgresqlRelations,
+} from "./postgresql-relation-loader";
 import { PostgresqlRepositoryOptions } from "./types";
 
 export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
@@ -44,7 +48,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
         query.values,
       );
 
-      return result.rows[0] ?? null;
+      return this.attachLazy(result.rows)[0] ?? null;
     },
   };
 
@@ -58,9 +62,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     switch (invocation.query.action) {
       case "find":
-        return this.manageMany(result.rows as TEntity[]);
+        return this.manageMany(this.attachLazy(result.rows as TEntity[]));
       case "findOne":
-        return this.manage((result.rows[0] as TEntity | undefined) ?? null);
+        return this.manage(this.attachLazy(result.rows as TEntity[])[0] ?? null);
       case "exists":
         return Boolean(result.rows[0]?.exists);
       case "count":
@@ -96,7 +100,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
   execute = this.executeDerivedQuery;
 
-  findById = async (id: TId, load?: { relations?: true | string[] }): Promise<TEntity | null> => {
+  findById = async (id: TId, load?: NPALoadOptions<TEntity>): Promise<TEntity | null> => {
     const query = compilePostgresqlFindById(id, this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
@@ -104,17 +108,17 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
 
     const loaded = await this.loadRelations(result.rows, load);
-    return this.manage(loaded[0] ?? null);
+    return this.manage(this.attachLazy(loaded)[0] ?? null);
   };
 
-  findAll = async (load?: { relations?: true | string[] }): Promise<TEntity[]> => {
+  findAll = async (load?: NPALoadOptions<TEntity>): Promise<TEntity[]> => {
     const query = compilePostgresqlFindAll(this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
       query.values,
     );
 
-    return this.manageMany(await this.loadRelations(result.rows, load));
+    return this.manageMany(this.attachLazy(await this.loadRelations(result.rows, load)));
   };
 
   existsById = async (id: TId): Promise<boolean> => {
@@ -153,7 +157,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
       throw new Error("PostgreSQL insert did not return a row.");
     }
 
-    return this.manage(inserted);
+    return this.manage(this.attachLazy([inserted])[0]);
   };
 
   update = async (
@@ -185,7 +189,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
       query.values,
     );
 
-    return this.manage(result.rows[0] ?? null);
+    return this.manage(this.attachLazy(result.rows)[0] ?? null);
   };
 
   delete = async (
@@ -226,10 +230,10 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   ): unknown {
     switch (query.result) {
       case "many":
-        return query.managed ? this.manageMany(rows) : rows;
+        return query.managed ? this.manageMany(this.attachLazy(rows)) : rows;
       case "one": {
         const row = rows[0] ?? null;
-        return query.managed ? this.manage(row) : row;
+        return query.managed ? this.manage(row ? this.attachLazy([row])[0] : null) : row;
       }
       case "scalar":
         return firstColumn(rows[0] ?? null);
@@ -273,9 +277,16 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     });
   }
 
+  private attachLazy(entities: TEntity[]): TEntity[] {
+    return attachPostgresqlLazyRelations(entities, {
+      entity: this.getEntityTarget(),
+      queryable: this.options.queryable,
+    });
+  }
+
   private async loadRelations(
     entities: TEntity[],
-    load: { relations?: true | string[] } | undefined,
+    load: NPALoadOptions<TEntity> | undefined,
   ): Promise<TEntity[]> {
     return loadPostgresqlRelations(entities, {
       entity: this.getEntityTarget(),
