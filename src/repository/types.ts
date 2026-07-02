@@ -1,9 +1,18 @@
 import { ParsedQueryMethod } from "../query-method";
+import type { NPAEntityGraphMetadata } from "./entity-graph-decorator";
 import type { NPARawQueryMetadata } from "./query-decorator";
+import type { NPARelationLoad } from "./relation-load-types";
+
+export type {
+  Loaded,
+  NPARelationLoad,
+  NPARelationLoadTree,
+} from "./relation-load-types";
 
 export interface RepositoryMethodInvocation {
   query: ParsedQueryMethod;
   args: unknown[];
+  entityGraph?: NPAEntityGraphMetadata;
 }
 
 export interface RepositoryMethodExecutor<TResult = unknown> {
@@ -14,6 +23,7 @@ export interface RepositoryRawQueryInvocation {
   query: NPARawQueryMetadata;
   methodName: string;
   args: unknown[];
+  entityGraph?: NPAEntityGraphMetadata;
 }
 
 export interface RepositoryRawQueryExecutor<TResult = unknown> {
@@ -21,19 +31,8 @@ export interface RepositoryRawQueryExecutor<TResult = unknown> {
 }
 
 export interface NPALoadOptions<TEntity extends object = object> {
-  relations?: true | Array<Extract<keyof TEntity, string> | string> | NPARelationLoadTree<TEntity>;
+  relations?: NPARelationLoad<TEntity>;
 }
-
-export type NPARelationLoadTree<TEntity extends object = object> = {
-  [K in Extract<keyof TEntity, string>]?: true | NPARelationLoadTree<NPAUnwrappedRelation<TEntity[K]>>;
-};
-
-type NPAUnwrappedRelation<TValue> =
-  TValue extends Promise<infer TResolved>
-    ? NPAUnwrappedRelation<TResolved>
-    : TValue extends readonly (infer TItem)[]
-      ? Extract<TItem, object>
-      : Extract<TValue, object>;
 
 export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findById(

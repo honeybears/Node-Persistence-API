@@ -57,6 +57,7 @@ import {
   ReferentialAction,
   UpdatedAt,
   Version,
+  type Relation,
 } from '@node-persistence-api/core';
 
 @Index([
@@ -85,10 +86,10 @@ class User {
     foreignKeyName: 'fk_users_team',
     onDelete: ReferentialAction.SET_NULL,
   })
-  team?: Team;
+  team?: Relation<Team | null>;
 
   @ManyToMany(() => Role, { joinTable: 'user_roles' })
-  roles?: Role[];
+  roles?: Relation<Role[]>;
 }
 ```
 
@@ -110,8 +111,10 @@ unique indexes. `@Column({ index: true })` and
 `@ManyToOne` creates a nullable foreign-key column using `joinColumn` or the
 default `<property>_<targetIdColumn>` name. Use `foreignKeyName`, `onDelete`,
 and `onUpdate` to control generated constraints. `@OneToMany` requires
-`mappedBy`; `@ManyToMany` creates a join table. Entity classes must be exported
-so repositories, application code, and migration tooling can reference them.
+`mappedBy`; `@ManyToMany` creates a join table. `Relation<T>` lets a relation
+field hold either a lazy promise or an explicitly loaded value. Entity classes
+must be exported so repositories, application code, and migration tooling can
+reference them.
 
 ## Repository Usage
 
@@ -145,10 +148,28 @@ const users = npa.get(UserRepository);
 ```
 
 ```ts
-import { NPARepository, Repository } from '@node-persistence-api/core';
+import {
+  EntityGraph,
+  NPARepository,
+  Repository,
+  defineEntityGraph,
+  type Loaded,
+} from '@node-persistence-api/core';
+
+const userGraph = defineEntityGraph<User>({
+  roles: true,
+  team: {
+    organization: true,
+  },
+});
 
 @Repository(User)
 export abstract class UserRepository extends NPARepository<User, number> {
+  @EntityGraph(userGraph)
+  abstract findByName: (
+    name: string,
+  ) => Promise<Loaded<User, typeof userGraph>[]>;
+
   abstract findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc(
     name: string,
   ): Promise<User[]>;
@@ -174,6 +195,27 @@ const user = await users.findById(1, {
 });
 const teams = await teamRepository.findAll({ relations: { members: true } });
 ```
+
+Use `@EntityGraph` on a repository method when that method should always load
+specific relations. Undecorated query methods do not receive entity graph
+metadata. NPA follows a MikroORM-style loaded type pattern: declare graph-loaded
+methods with `Loaded<TEntity, Graph>` so selected relation fields are typed as
+their resolved values instead of promises.
+
+```ts
+// Reuse the userGraph constant from the repository example above.
+@Repository(User)
+export abstract class UserRepository extends NPARepository<User, number> {
+  @EntityGraph(userGraph)
+  abstract findByEmailAllIgnoreCase: (
+    email: string,
+  ) => Promise<Loaded<User, typeof userGraph>[]>;
+}
+```
+
+TypeScript does not allow decorators on abstract method declarations. For
+decorated derived query methods, declare an abstract function property as shown
+above.
 
 Relation fields are lazy-loadable when they were not loaded explicitly:
 

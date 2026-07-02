@@ -129,12 +129,14 @@ function selectRelations(
     });
   }
 
-  return Object.entries(requested).map(([propertyName, nested]) => {
+  const relationTree = requested as Record<string, true | NPARelationLoadTree>;
+
+  return Object.entries(relationTree).map(([propertyName, nested]) => {
     const relation = findRelation(metadata, propertyName);
 
     return {
       relation,
-      nested: nested === true ? undefined : nested as NPARelationLoadTree,
+      nested: nested === true ? undefined : nested,
     };
   });
 }

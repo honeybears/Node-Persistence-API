@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -83,6 +83,18 @@ class Member {
 
   @ManyToMany(() => Role, { joinTable: "member_roles" })
   roles!: Role[];
+}
+
+abstract class MemberGraphRepository extends NPARepository<Member, number> {
+  @EntityGraph({
+    relations: {
+      team: {
+        organization: true,
+      },
+      roles: true,
+    },
+  })
+  abstract findByName: (name: string) => Promise<Member[]>;
 }
 
 @Entity({ name: "broken_teams" })
@@ -955,6 +967,53 @@ describe("MySQL adapter", () => {
     ]);
 
     expect(calls.length).toEqual(9);
+  });
+
+  test("loads MySQL @EntityGraph relations only for decorated repository methods", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text === "SELECT * FROM `members` WHERE (`name` = ?)") {
+          return [[{ member_id: 10, name: values[0], team_id: 2 }], []];
+        }
+
+        if (text === "SELECT * FROM `teams` WHERE `team_id` IN (?)") {
+          return [[{ team_id: 2, label: "core", organization_id: 3 }], []];
+        }
+
+        if (text === "SELECT * FROM `organizations` WHERE `organization_id` IN (?)") {
+          return [[{ organization_id: 3, name: "platform" }], []];
+        }
+
+        if (text.includes("FROM `member_roles` j")) {
+          return [[
+            { __npa_source_id: 10, role_id: 7, name: "admin" },
+            { __npa_source_id: 10, role_id: 8, name: "writer" },
+          ], []];
+        }
+
+        throw new Error(`Unexpected query: ${text}`);
+      },
+    };
+    const repository = createMysqlDerivedQueryRepository(
+      Object.create(MemberGraphRepository.prototype),
+      { entity: Member, queryable: asMysqlQueryable(queryable) },
+    );
+
+    const [member] = await repository.findByName("kim");
+    expect(member.team).toEqual({
+      organization: { organization_id: 3, name: "platform" },
+      organization_id: 3,
+      team_id: 2,
+      label: "core",
+    });
+    expect(member.roles).toEqual([
+      { role_id: 7, name: "admin" },
+      { role_id: 8, name: "writer" },
+    ]);
+    expect(calls.length).toEqual(4);
   });
 
   test("flushes dirty managed entities through a MySQL repository", async () => {

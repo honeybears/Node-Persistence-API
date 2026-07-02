@@ -2,6 +2,8 @@ export type EntityTarget<TEntity extends object = object> = new (
   ...args: any[]
 ) => TEntity;
 
+export type Relation<TValue> = TValue | Promise<TValue>;
+
 export interface EntityOptions {
   name?: string;
   schema?: string;

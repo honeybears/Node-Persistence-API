@@ -2,6 +2,7 @@ import {
   getCurrentPersistenceContext,
   getOptionalEntityMetadata,
   type EntityTarget,
+  NPAEntityGraphMetadata,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
   NPALoadOptions,
@@ -72,10 +73,20 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
 
     switch (invocation.query.action) {
-      case "find":
-        return this.manageMany(this.attachLazy(result.rows as TEntity[]));
-      case "findOne":
-        return this.manage(this.attachLazy(result.rows as TEntity[])[0] ?? null);
+      case "find": {
+        const rows = await this.loadRelations(
+          result.rows as TEntity[],
+          toEntityGraphLoad(invocation.entityGraph),
+        );
+        return this.manageMany(this.attachLazy(rows));
+      }
+      case "findOne": {
+        const rows = await this.loadRelations(
+          result.rows.slice(0, 1) as TEntity[],
+          toEntityGraphLoad(invocation.entityGraph),
+        );
+        return this.manage(this.attachLazy(rows)[0] ?? null);
+      }
       case "exists":
         return Boolean(result.rows[0]?.exists);
       case "count":
@@ -106,9 +117,14 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       query.values,
     );
 
+    const rows = await this.loadRelations(
+      result.rows as TEntity[],
+      toEntityGraphLoad(invocation.entityGraph),
+    );
+
     return this.formatRawQueryResult(
       invocation.query,
-      result.rows as TEntity[],
+      rows,
       result.affectedRows ?? 0,
     );
   };
@@ -368,6 +384,12 @@ function firstColumn(row: object | null): unknown {
 
   const [value] = Object.values(row);
   return value ?? null;
+}
+
+function toEntityGraphLoad<TEntity extends object>(
+  entityGraph: NPAEntityGraphMetadata<TEntity> | undefined,
+): NPALoadOptions<TEntity> | undefined {
+  return entityGraph ? { relations: entityGraph.relations } : undefined;
 }
 
 function readExpectedVersionFromPatch(

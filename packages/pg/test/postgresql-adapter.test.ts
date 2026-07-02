@@ -1,5 +1,5 @@
 import { compilePostgresqlDeleteById, compilePostgresqlDeleteAll, compilePostgresqlExistsById, compilePostgresqlFindAll, compilePostgresqlFindById, compilePostgresqlInsert, compilePostgresqlCount, compilePostgresqlQuery, compilePostgresqlRawQuery, compilePostgresqlUpdate, compilePostgresqlVersionedUpdate, createPostgresqlDerivedQueryRepository, PostgresqlConnection, postgresql, type PostgresqlDriverConnection, type PostgresqlQueryable } from "../src";
-import { AbstractTransactionManager, Column, CreatedAt, Entity, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, parseQueryMethod } from "../../../src";
 import { describe, expect, test } from "@jest/globals";
 
 type DynamicRepository = Record<string, (...args: unknown[]) => unknown>;
@@ -101,6 +101,18 @@ class PgMember {
 
   @ManyToMany(() => PgRole, { joinTable: "member_roles" })
   roles!: PgRole[];
+}
+
+abstract class PgMemberGraphRepository extends NPARepository<PgMember, number> {
+  @EntityGraph({
+    relations: {
+      team: {
+        organization: true,
+      },
+      roles: true,
+    },
+  })
+  abstract findByName: (name: string) => Promise<PgMember[]>;
 }
 
 @Entity({ name: "broken_teams" })
@@ -1025,6 +1037,56 @@ describe("PostgreSQL adapter", () => {
     ]);
 
     expect(calls.length).toEqual(9);
+  });
+
+  test("loads PostgreSQL @EntityGraph relations only for decorated repository methods", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text === 'SELECT * FROM "members" WHERE ("name" = $1)') {
+          return { rows: [{ member_id: 10, name: values[0], team_id: 2 }], rowCount: 1 };
+        }
+
+        if (text === 'SELECT * FROM "teams" WHERE "team_id" IN ($1)') {
+          return { rows: [{ team_id: 2, label: "core", organization_id: 3 }], rowCount: 1 };
+        }
+
+        if (text === 'SELECT * FROM "organizations" WHERE "organization_id" IN ($1)') {
+          return { rows: [{ organization_id: 3, name: "platform" }], rowCount: 1 };
+        }
+
+        if (text.includes('FROM "member_roles" j')) {
+          return {
+            rows: [
+              { __npa_source_id: 10, role_id: 7, name: "admin" },
+              { __npa_source_id: 10, role_id: 8, name: "writer" },
+            ],
+            rowCount: 2,
+          };
+        }
+
+        throw new Error(`Unexpected query: ${text}`);
+      },
+    };
+    const repository = createPostgresqlDerivedQueryRepository(
+      Object.create(PgMemberGraphRepository.prototype),
+      { entity: PgMember, queryable: asPgQueryable(queryable) },
+    );
+
+    const [member] = await repository.findByName("kim");
+    expect(member.team).toEqual({
+      organization: { organization_id: 3, name: "platform" },
+      organization_id: 3,
+      team_id: 2,
+      label: "core",
+    });
+    expect(member.roles).toEqual([
+      { role_id: 7, name: "admin" },
+      { role_id: 8, name: "writer" },
+    ]);
+    expect(calls.length).toEqual(4);
   });
 
   test("flushes dirty managed entities through a PostgreSQL repository", async () => {

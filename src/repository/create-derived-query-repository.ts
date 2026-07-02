@@ -2,9 +2,12 @@ import {
   assertNoDuplicateQueryPredicates,
   parseQueryMethod,
 } from "../query-method";
+import { getEntityGraphMetadata } from "./entity-graph-decorator";
 import { getRawQueryMetadata } from "./query-decorator";
 import {
+  RepositoryMethodInvocation,
   RepositoryMethodExecutor,
+  RepositoryRawQueryInvocation,
   RepositoryRawQueryExecutor,
 } from "./types";
 
@@ -20,6 +23,7 @@ export function createDerivedQueryRepository<TRepository extends object>(
       }
 
       const rawQuery = getRawQueryMetadata(currentTarget, property);
+      const entityGraph = getEntityGraphMetadata(currentTarget, property);
 
       if (rawQuery) {
         return (...args: unknown[]) => {
@@ -29,11 +33,17 @@ export function createDerivedQueryRepository<TRepository extends object>(
             );
           }
 
-          return rawExecutor({
+          const invocation: RepositoryRawQueryInvocation = {
             query: rawQuery,
             methodName: property,
             args,
-          });
+          };
+
+          if (entityGraph) {
+            invocation.entityGraph = entityGraph;
+          }
+
+          return rawExecutor(invocation);
         };
       }
 
@@ -51,7 +61,13 @@ export function createDerivedQueryRepository<TRepository extends object>(
           );
         }
 
-        return executor({ query, args });
+        const invocation: RepositoryMethodInvocation = { query, args };
+
+        if (entityGraph) {
+          invocation.entityGraph = entityGraph;
+        }
+
+        return executor(invocation);
       };
     },
   });

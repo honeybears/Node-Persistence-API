@@ -1,5 +1,11 @@
 import { createDerivedQueryRepository } from "./create-derived-query-repository";
-import { NPARepository, NPARepositoryAdapter } from "./types";
+import { getEntityGraphMetadata } from "./entity-graph-decorator";
+import {
+  NPARepository,
+  NPARepositoryAdapter,
+  NPALoadOptions,
+  NPARelationLoadTree,
+} from "./types";
 
 export function createNPARepository<
   TRepository extends object,
@@ -12,8 +18,21 @@ export function createNPARepository<
   const repository = Object.assign(
     Object.create(Object.getPrototypeOf(target) ?? Object.prototype),
     {
-      findById: adapter.findById,
-      findAll: adapter.findAll,
+      findById: (id: TId, options?: NPALoadOptions<TEntity>) =>
+        adapter.findById(
+          id,
+          mergeLoadOptions(
+            toLoadOptions(getEntityGraphMetadata(target, "findById")),
+            options,
+          ),
+        ),
+      findAll: (options?: NPALoadOptions<TEntity>) =>
+        adapter.findAll(
+          mergeLoadOptions(
+            toLoadOptions(getEntityGraphMetadata(target, "findAll")),
+            options,
+          ),
+        ),
       existsById: adapter.existsById,
       count: adapter.count,
       save: adapter.save,
@@ -40,4 +59,51 @@ export function createNPARepository<
       return adapter.executeRawQuery(invocation);
     },
   ) as TRepository & NPARepository<TEntity, TId>;
+}
+
+function toLoadOptions<TEntity extends object>(
+  entityGraph: ReturnType<typeof getEntityGraphMetadata> | undefined,
+): NPALoadOptions<TEntity> | undefined {
+  return entityGraph ? { relations: entityGraph.relations } : undefined;
+}
+
+function mergeLoadOptions<TEntity extends object>(
+  left: NPALoadOptions<TEntity> | undefined,
+  right: NPALoadOptions<TEntity> | undefined,
+): NPALoadOptions<TEntity> | undefined {
+  if (!left?.relations) {
+    return right;
+  }
+
+  if (!right?.relations) {
+    return left;
+  }
+
+  const leftRelations = left.relations;
+  const rightRelations = right.relations;
+
+  if (leftRelations === true || rightRelations === true) {
+    return { relations: true };
+  }
+
+  if (Array.isArray(leftRelations) && Array.isArray(rightRelations)) {
+    return { relations: [...new Set([...leftRelations, ...rightRelations])] };
+  }
+
+  return {
+    relations: {
+      ...toRelationTree(leftRelations),
+      ...toRelationTree(rightRelations),
+    },
+  };
+}
+
+function toRelationTree(
+  relations: ReadonlyArray<string> | NPARelationLoadTree,
+): NPARelationLoadTree {
+  if (Array.isArray(relations)) {
+    return Object.fromEntries(relations.map((relation) => [relation, true]));
+  }
+
+  return relations;
 }

@@ -1,18 +1,64 @@
 import { describe, expect, test } from "@jest/globals";
 import {
+  EntityGraph,
   InMemoryRepositoryExecutor,
   Query,
   createDerivedQueryRepository,
   createNPARepository,
   createQueryMethodProxy,
+  defineEntityGraph,
   parseQueryMethod,
+  type Loaded,
   type NPARepositoryAdapter,
+  type Relation,
+  type RepositoryMethodInvocation,
   type RepositoryRawQueryInvocation,
 } from "../src";
 
 type DynamicRepository = Record<string, (...args: unknown[]) => unknown>;
 
+interface GraphOrganization {
+  name: string;
+}
+
+interface GraphTeam {
+  label: string;
+  organization: Relation<GraphOrganization>;
+}
+
+interface GraphRole {
+  name: string;
+}
+
+interface GraphMember {
+  name: string;
+  team: Relation<GraphTeam>;
+  roles: Relation<GraphRole[]>;
+}
+
+const memberGraph = defineEntityGraph<GraphMember>({
+  team: {
+    organization: true,
+  },
+  roles: true,
+});
+
 describe("derived query methods", () => {
+  test("narrows loaded relation fields from graph selections", () => {
+    const member = {
+      name: "kim",
+      team: {
+        label: "core",
+        organization: { name: "platform" },
+      },
+      roles: [{ name: "admin" }],
+    } satisfies Loaded<GraphMember, typeof memberGraph>;
+
+    expect(memberGraph.roles).toEqual(true);
+    expect(member.team.organization.name).toEqual("platform");
+    expect(member.roles[0].name).toEqual("admin");
+  });
+
   test("parses a Spring Data JPA style method name into a query AST", () => {
     expect(
       parseQueryMethod(
@@ -253,6 +299,89 @@ describe("derived query methods", () => {
         methodName: "findBySql",
         args: ["kim"],
       },
+    ]);
+  });
+
+  test("passes @EntityGraph only when a repository method declares it", () => {
+    const calls: RepositoryMethodInvocation[] = [];
+
+    abstract class UserRepository {
+      @EntityGraph(["team"])
+      abstract findByName: (name: string) => unknown[];
+    }
+
+    const repository = createDerivedQueryRepository(
+      Object.create(UserRepository.prototype) as DynamicRepository,
+      (invocation) => {
+        calls.push(invocation);
+        return [];
+      },
+    );
+
+    expect(repository.findByName("kim")).toEqual([]);
+    expect(repository.findByAge(20)).toEqual([]);
+    expect(calls[0].entityGraph).toEqual({ relations: ["team"] });
+    expect("entityGraph" in calls[1]).toEqual(false);
+  });
+
+  test("uses explicit @EntityGraph defaults for base read methods", async () => {
+    const loads: unknown[] = [];
+
+    abstract class UserRepository {
+      @EntityGraph(["team"])
+      abstract findById: (id: number) => Promise<object | null>;
+    }
+
+    const adapter: NPARepositoryAdapter<object, number> = {
+      async findById(id, load) {
+        loads.push(load);
+        return { id };
+      },
+      async findAll(load) {
+        loads.push(load);
+        return [];
+      },
+      async existsById() {
+        return false;
+      },
+      async count() {
+        return 0;
+      },
+      async save(entity) {
+        return entity;
+      },
+      async insert(entity) {
+        return entity;
+      },
+      async update(entity) {
+        return entity;
+      },
+      async updateById() {
+        return null;
+      },
+      async delete() {
+        return 0;
+      },
+      async deleteById() {
+        return 0;
+      },
+      async deleteAll() {
+        return 0;
+      },
+      async executeDerivedQuery() {
+        throw new Error("derived query should not run");
+      },
+    };
+    const repository = createNPARepository(
+      Object.create(UserRepository.prototype),
+      adapter,
+    );
+
+    await repository.findById(1);
+    await repository.findById(2, { relations: ["roles"] });
+    expect(loads).toEqual([
+      { relations: ["team"] },
+      { relations: ["team", "roles"] },
     ]);
   });
 
