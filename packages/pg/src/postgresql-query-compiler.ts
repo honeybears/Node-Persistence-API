@@ -98,9 +98,21 @@ class QueryCompiler {
 
     switch (condition.operator) {
       case "equals":
-        return `${column} = ${this.value(condition, (value) => normalizeCaseValue(value, ignoreCase))}`;
+        return this.nullableComparison(
+          column,
+          condition,
+          "=",
+          "IS NULL",
+          (value) => normalizeCaseValue(value, ignoreCase),
+        );
       case "not":
-        return `${column} <> ${this.value(condition, (value) => normalizeCaseValue(value, ignoreCase))}`;
+        return this.nullableComparison(
+          column,
+          condition,
+          "<>",
+          "IS NOT NULL",
+          (value) => normalizeCaseValue(value, ignoreCase),
+        );
       case "lessThan":
         return `${column} < ${this.value(condition)}`;
       case "lessThanEqual":
@@ -111,8 +123,8 @@ class QueryCompiler {
         return `${column} >= ${this.value(condition)}`;
       case "between": {
         const index = requireParameterIndex(condition);
-        return `${column} BETWEEN ${this.push(this.normalizeConditionValue(condition, this.arg(index)))} AND ${this.push(
-          this.normalizeConditionValue(condition, this.arg(index + 1)),
+        return `${column} BETWEEN ${this.push(this.normalizeConditionValue(condition, this.arg(condition, index)))} AND ${this.push(
+          this.normalizeConditionValue(condition, this.arg(condition, index + 1)),
         )}`;
       }
       case "like":
@@ -186,9 +198,28 @@ class QueryCompiler {
   ): string {
     const value = this.normalizeConditionValue(
       condition,
-      this.arg(requireParameterIndex(condition)),
+      this.arg(condition, requireParameterIndex(condition)),
     );
     return this.push(transform(value));
+  }
+
+  private nullableComparison(
+    column: string,
+    condition: QueryCondition,
+    operator: "=" | "<>",
+    nullSql: "IS NULL" | "IS NOT NULL",
+    transform: (value: unknown) => unknown,
+  ): string {
+    const value = this.normalizeConditionValue(
+      condition,
+      this.arg(condition, requireParameterIndex(condition)),
+    );
+
+    if (value === null) {
+      return `${column} ${nullSql}`;
+    }
+
+    return `${column} ${operator} ${this.push(transform(value))}`;
   }
 
   private normalizeConditionValue(condition: QueryCondition, value: unknown): unknown {
@@ -196,7 +227,7 @@ class QueryCompiler {
   }
 
   private arrayValue(condition: QueryCondition, ignoreCase: boolean): string {
-    const value = this.arg(requireParameterIndex(condition));
+    const value = this.arg(condition, requireParameterIndex(condition));
 
     if (!Array.isArray(value)) {
       throw new Error(
@@ -213,8 +244,16 @@ class QueryCompiler {
     return this.relationQuery.column(property);
   }
 
-  private arg(index: number): unknown {
-    return this.invocation.args[index];
+  private arg(condition: QueryCondition, index: number): unknown {
+    const value = this.invocation.args[index];
+
+    if (value === undefined) {
+      throw new Error(
+        `Query method "${this.invocation.query.methodName}" parameter for "${condition.property}" must not be undefined.`,
+      );
+    }
+
+    return value;
   }
 
   private push(value: unknown): string {

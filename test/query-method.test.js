@@ -244,3 +244,23 @@ test("executes find, exists, count, and delete query methods in memory", () => {
     },
   ]);
 });
+
+test("handles null and empty list query parameters in memory", () => {
+  const rows = [
+    { id: 1, name: "desk", status: null },
+    { id: 2, name: "chair", status: "active" },
+    { id: 3, name: undefined, status: "archived" },
+  ];
+  const executor = new InMemoryRepositoryExecutor(rows);
+  const repository = createDerivedQueryRepository({}, executor.execute);
+
+  assert.deepEqual(repository.findByStatus(null), [rows[0]]);
+  assert.deepEqual(repository.findByNameIsNull(), [rows[2]]);
+  assert.deepEqual(repository.findByStatusIsNotNull(), [rows[1], rows[2]]);
+  assert.deepEqual(repository.findByStatusIn([]), []);
+  assert.deepEqual(repository.findByStatusNotIn([]), rows);
+  assert.throws(
+    () => repository.findByStatus(undefined),
+    /must not be undefined/,
+  );
+});

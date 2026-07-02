@@ -24,6 +24,7 @@ const {
   compileMysqlFindAll,
   compileMysqlInsert,
   compileMysqlQuery,
+  compileMysqlRawQuery,
   compileMysqlUpdate,
   compileMysqlFindById,
   createMysqlDerivedQueryRepository,
@@ -134,6 +135,76 @@ test("compiles derived query methods into parameterized MySQL SQL", () => {
         "SELECT * FROM `shop`.`products` WHERE (`product_name` = ?) OR (`price` > ? AND `active` IS TRUE)",
       values: ["desk", 100],
     },
+  );
+});
+
+test("compiles MySQL null and empty-list derived query parameters", () => {
+  assert.deepEqual(
+    compileMysqlQuery(
+      {
+        query: parseQueryMethod("findByName"),
+        args: [null],
+      },
+      { entity: Product },
+    ),
+    {
+      text: "SELECT * FROM `shop`.`products` WHERE (`product_name` IS NULL)",
+      values: [],
+    },
+  );
+
+  assert.deepEqual(
+    compileMysqlQuery(
+      {
+        query: parseQueryMethod("findByNameNot"),
+        args: [null],
+      },
+      { entity: Product },
+    ),
+    {
+      text: "SELECT * FROM `shop`.`products` WHERE (`product_name` IS NOT NULL)",
+      values: [],
+    },
+  );
+
+  assert.deepEqual(
+    compileMysqlQuery(
+      {
+        query: parseQueryMethod("findByStatusIn"),
+        args: [[]],
+      },
+      { entity: Product },
+    ),
+    {
+      text: "SELECT * FROM `shop`.`products` WHERE (0 = 1)",
+      values: [],
+    },
+  );
+
+  assert.deepEqual(
+    compileMysqlQuery(
+      {
+        query: parseQueryMethod("findByStatusNotIn"),
+        args: [[]],
+      },
+      { entity: Product },
+    ),
+    {
+      text: "SELECT * FROM `shop`.`products` WHERE (1 = 1)",
+      values: [],
+    },
+  );
+
+  assert.throws(
+    () =>
+      compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByName"),
+          args: [undefined],
+        },
+        { entity: Product },
+      ),
+    /must not be undefined/,
   );
 });
 
@@ -407,6 +478,43 @@ test("executes @Query raw MySQL repository methods", async () => {
       values: [5, 5],
     },
   ]);
+});
+
+test("binds raw MySQL named and positional parameters safely", () => {
+  assert.deepEqual(
+    compileMysqlRawQuery(
+      "SELECT ':id' AS literal WHERE `owner_id` = :id OR `reviewer_id` = :id AND `status` = :status",
+      [7, "active"],
+      "findRaw",
+    ),
+    {
+      text:
+        "SELECT ':id' AS literal WHERE `owner_id` = ? OR `reviewer_id` = ? AND `status` = ?",
+      values: [7, 7, "active"],
+    },
+  );
+
+  assert.deepEqual(
+    compileMysqlRawQuery(
+      "SELECT '?' AS literal WHERE `id` = ?",
+      [1],
+      "findRaw",
+    ),
+    {
+      text: "SELECT '?' AS literal WHERE `id` = ?",
+      values: [1],
+    },
+  );
+
+  assert.throws(
+    () =>
+      compileMysqlRawQuery(
+        "SELECT :id, :status",
+        [7],
+        "findRaw",
+      ),
+    /uses named parameter/,
+  );
 });
 
 test("runs derived queries and CRUD through a mysql2-style queryable", async () => {

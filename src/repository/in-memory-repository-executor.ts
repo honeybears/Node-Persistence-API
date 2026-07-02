@@ -96,36 +96,54 @@ function matchesCondition<TEntity extends object>(
 
   switch (condition.operator) {
     case "equals":
-      return actual === expected;
+      assertDefinedQueryParameter(condition, expected);
+      return expected === null
+        ? actual === null || actual === undefined
+        : actual === expected;
     case "not":
-      return actual !== expected;
+      assertDefinedQueryParameter(condition, expected);
+      return expected === null
+        ? actual !== null && actual !== undefined
+        : actual !== expected;
     case "lessThan":
+      assertDefinedQueryParameter(condition, expected);
       return compare(actual, expected) < 0;
     case "lessThanEqual":
+      assertDefinedQueryParameter(condition, expected);
       return compare(actual, expected) <= 0;
     case "greaterThan":
+      assertDefinedQueryParameter(condition, expected);
       return compare(actual, expected) > 0;
     case "greaterThanEqual":
+      assertDefinedQueryParameter(condition, expected);
       return compare(actual, expected) >= 0;
     case "between":
       if (!isBetweenArgument(expected)) {
         return false;
       }
 
+      assertDefinedQueryParameter(condition, expected[0]);
+      assertDefinedQueryParameter(condition, expected[1]);
       return (
         compare(actual, expected[0]) >= 0 && compare(actual, expected[1]) <= 0
       );
     case "like":
+      assertDefinedQueryParameter(condition, expected);
       return matchesLike(actual, expected);
     case "startingWith":
+      assertDefinedQueryParameter(condition, expected);
       return String(actual).startsWith(String(expected));
     case "endingWith":
+      assertDefinedQueryParameter(condition, expected);
       return String(actual).endsWith(String(expected));
     case "containing":
+      assertDefinedQueryParameter(condition, expected);
       return String(actual).includes(String(expected));
     case "in":
+      assertDefinedQueryParameter(condition, expected);
       return Array.isArray(expected) && expected.includes(actual);
     case "notIn":
+      assertDefinedQueryParameter(condition, expected);
       return Array.isArray(expected) && !expected.includes(actual);
     case "isNull":
       return actual === null || actual === undefined;
@@ -155,6 +173,17 @@ function readArgument(
 
 function isBetweenArgument(value: unknown): value is [unknown, unknown] {
   return Array.isArray(value) && value.length === 2;
+}
+
+function assertDefinedQueryParameter(
+  condition: QueryCondition,
+  value: unknown,
+): void {
+  if (value === undefined) {
+    throw new Error(
+      `Query parameter for "${condition.property}" must not be undefined.`,
+    );
+  }
 }
 
 function sortRows<TEntity extends object>(

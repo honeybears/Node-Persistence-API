@@ -10,6 +10,7 @@ const {
   compilePostgresqlInsert,
   compilePostgresqlCount,
   compilePostgresqlQuery,
+  compilePostgresqlRawQuery,
   compilePostgresqlUpdate,
   createPostgresqlDerivedQueryRepository,
   PostgresqlConnection,
@@ -132,6 +133,76 @@ test("preserves AND precedence by grouping OR predicate parts", () => {
       'SELECT * FROM "users" WHERE ("name" = $1) OR ("age" > $2 AND "active" IS TRUE)',
     values: ["kim", 20],
   });
+});
+
+test("compiles PostgreSQL null and empty-list derived query parameters", () => {
+  assert.deepEqual(
+    compilePostgresqlQuery(
+      {
+        query: parseQueryMethod("findByName"),
+        args: [null],
+      },
+      { tableName: "users" },
+    ),
+    {
+      text: 'SELECT * FROM "users" WHERE ("name" IS NULL)',
+      values: [],
+    },
+  );
+
+  assert.deepEqual(
+    compilePostgresqlQuery(
+      {
+        query: parseQueryMethod("findByNameNot"),
+        args: [null],
+      },
+      { tableName: "users" },
+    ),
+    {
+      text: 'SELECT * FROM "users" WHERE ("name" IS NOT NULL)',
+      values: [],
+    },
+  );
+
+  assert.deepEqual(
+    compilePostgresqlQuery(
+      {
+        query: parseQueryMethod("findByStatusIn"),
+        args: [[]],
+      },
+      { tableName: "users" },
+    ),
+    {
+      text: 'SELECT * FROM "users" WHERE ("status" = ANY($1))',
+      values: [[]],
+    },
+  );
+
+  assert.deepEqual(
+    compilePostgresqlQuery(
+      {
+        query: parseQueryMethod("findByStatusNotIn"),
+        args: [[]],
+      },
+      { tableName: "users" },
+    ),
+    {
+      text: 'SELECT * FROM "users" WHERE ("status" <> ALL($1))',
+      values: [[]],
+    },
+  );
+
+  assert.throws(
+    () =>
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByName"),
+          args: [undefined],
+        },
+        { tableName: "users" },
+      ),
+    /must not be undefined/,
+  );
 });
 
 test("compiles PostgreSQL derived queries across relation fields", () => {
@@ -491,6 +562,43 @@ test("executes @Query raw PostgreSQL repository methods", async () => {
       values: [5],
     },
   ]);
+});
+
+test("binds raw PostgreSQL named and positional parameters safely", () => {
+  assert.deepEqual(
+    compilePostgresqlRawQuery(
+      'SELECT :id::int AS id, \':id\' AS literal WHERE "owner_id" = :id AND "status" = :status',
+      [7, "active"],
+      "findRaw",
+    ),
+    {
+      text:
+        'SELECT $1::int AS id, \':id\' AS literal WHERE "owner_id" = $1 AND "status" = $2',
+      values: [7, "active"],
+    },
+  );
+
+  assert.deepEqual(
+    compilePostgresqlRawQuery(
+      "SELECT ? AS value, '?' AS literal",
+      [1],
+      "findRaw",
+    ),
+    {
+      text: "SELECT $1 AS value, '?' AS literal",
+      values: [1],
+    },
+  );
+
+  assert.throws(
+    () =>
+      compilePostgresqlRawQuery(
+        "SELECT :id, :status",
+        [7],
+        "findRaw",
+      ),
+    /uses named parameter/,
+  );
 });
 
 test("runs save, insert, updateById, and deleteById through a PostgreSQL queryable", async () => {

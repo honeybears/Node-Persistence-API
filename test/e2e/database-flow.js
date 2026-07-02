@@ -54,7 +54,7 @@ const databaseAdapters = [
         product_name TEXT NOT NULL,
         price INTEGER NOT NULL,
         active BOOLEAN NOT NULL,
-        status TEXT NOT NULL,
+        status TEXT,
         created_at TIMESTAMPTZ NOT NULL,
         version INTEGER NOT NULL
       )
@@ -86,7 +86,7 @@ const databaseAdapters = [
         product_name VARCHAR(255) NOT NULL,
         price INT NOT NULL,
         active BOOLEAN NOT NULL,
-        status VARCHAR(64) NOT NULL,
+        status VARCHAR(64),
         created_at DATETIME(3) NOT NULL,
         version INT NOT NULL
       )
@@ -134,7 +134,7 @@ async function runDatabaseFlow(t, adapter, flow) {
   });
 }
 
-async function assertRepositoryContract(repository) {
+async function assertRepositoryContract(repository, options = {}) {
   const first = await repository.insert({
     name: "desk alpha",
     price: 120,
@@ -211,6 +211,44 @@ async function assertRepositoryContract(repository) {
     createdAt: new Date("2026-01-04T00:00:00.000Z"),
   });
   assert.equal(await repository.deleteAll(), 1);
+  assert.equal(await repository.count(), 0);
+
+  if (options.nullableStatus) {
+    await assertNullableStatusContract(repository);
+  }
+}
+
+async function assertNullableStatusContract(repository) {
+  await repository.insert({
+    name: "null status",
+    price: 50,
+    active: true,
+    status: null,
+    createdAt: new Date("2026-01-05T00:00:00.000Z"),
+  });
+  await repository.insert({
+    name: "active status",
+    price: 60,
+    active: true,
+    status: "active",
+    createdAt: new Date("2026-01-06T00:00:00.000Z"),
+  });
+
+  assert.deepEqual(
+    (await repository.findByStatus(null)).map((row) => row.product_name),
+    ["null status"],
+  );
+  assert.deepEqual(
+    (await repository.findByStatusIsNull()).map((row) => row.product_name),
+    ["null status"],
+  );
+  assert.deepEqual(await repository.findByStatusIn([]), []);
+  assert.equal((await repository.findByStatusNotIn([])).length, 2);
+  await assert.rejects(
+    () => repository.findByStatus(undefined),
+    /must not be undefined/,
+  );
+  assert.equal(await repository.deleteAll(), 2);
   assert.equal(await repository.count(), 0);
 }
 

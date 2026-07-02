@@ -174,10 +174,26 @@ for (const adapter of databaseAdapters) {
         fs.existsSync(path.join(migrationRoot, migrationDirs[0], "migration.sql")),
         true,
       );
+      const migrationFilePath = path.join(
+        migrationRoot,
+        migrationDirs[0],
+        "migration.sql",
+      );
 
       const deploy = runCli(["migrate", "deploy", "--config", "npa.config.mjs"], root);
       assert.equal(deploy.status, 0, deploy.stderr);
       assert.match(deploy.stdout, /No pending migrations/);
+
+      const migrationSql = fs.readFileSync(migrationFilePath, "utf8");
+      fs.appendFileSync(migrationFilePath, "\n-- tampered\n", "utf8");
+      const tampered = runCli(["migrate", "deploy", "--config", "npa.config.mjs"], root);
+      assert.notEqual(tampered.status, 0);
+      assert.match(tampered.stderr, /checksum mismatch/);
+      fs.writeFileSync(migrationFilePath, migrationSql, "utf8");
+
+      const restored = runCli(["migrate", "deploy", "--config", "npa.config.mjs"], root);
+      assert.equal(restored.status, 0, restored.stderr);
+      assert.match(restored.stdout, /No pending migrations/);
 
       queryable = await adapter.createQueryable(container);
       const repository = adapter.createRepository({
