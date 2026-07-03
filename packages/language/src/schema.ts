@@ -43,6 +43,10 @@ export function toNPALanguageWorkspaceSchema(
 }
 
 function toLanguageRelationKind(kind: string): NPALanguageEntityRelationKind {
+  if (kind === NPALanguageEntityRelationKind.ONE_TO_ONE) {
+    return NPALanguageEntityRelationKind.ONE_TO_ONE;
+  }
+
   if (kind === NPALanguageEntityRelationKind.ONE_TO_MANY) {
     return NPALanguageEntityRelationKind.ONE_TO_MANY;
   }

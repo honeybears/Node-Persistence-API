@@ -1,5 +1,7 @@
 # Node Persistence API (NPA)
 
+[GitHub: honeybears/Node-Persistence-API](https://github.com/honeybears/Node-Persistence-API)
+
 NPA provides repository APIs for Node and TypeScript inspired by familiar
 persistence patterns from the Java ecosystem. Application code depends on
 `NPARepository<TEntity, TId>`, while the selected adapter handles the actual
@@ -7,6 +9,16 @@ database runtime such as PostgreSQL or MySQL.
 
 NPA is an independent project. It is not affiliated with Oracle, the Eclipse
 Foundation, Jakarta EE, Spring, or Broadcom.
+
+## Packages
+
+| Package | README | Purpose |
+| --- | --- | --- |
+| `@node-persistence-api/core` | this file | decorators, repositories, migrations, transactions |
+| `@node-persistence-api/connector-pg` | [packages/pg](./packages/pg/README.md) | PostgreSQL runtime adapter |
+| `@node-persistence-api/connector-mysql` | [packages/mysql](./packages/mysql/README.md) | MySQL runtime adapter |
+| `@node-persistence-api/language` | [packages/language](./packages/language/README.md) | editor-independent completions and diagnostics |
+| `npa` | [packages/vscode](./packages/vscode/README.md) | VS Code extension |
 
 ## Install
 
@@ -54,6 +66,7 @@ import {
   Index,
   ManyToMany,
   ManyToOne,
+  OneToOne,
   OneToMany,
   ReferentialAction,
   UpdatedAt,
@@ -110,10 +123,16 @@ entity dirty flushes check the previous value and increment it. Use class-level
 to `@Index` to declare multiple indexes, and set `unique: true` for composite
 unique indexes. `@Column({ index: true })` and
 `@Column({ unique: true })` are shorthand for single-column indexes.
-`@ManyToOne` creates a nullable foreign-key column using `joinColumn` or the
-default `<property>_<targetIdColumn>` name. Use `foreignKeyName`, `onDelete`,
-and `onUpdate` to control generated constraints. `@OneToMany` requires
-`mappedBy`; `@ManyToMany` creates a join table. Use `cascade` with
+Multiple `@Id` columns define a composite primary key for direct CRUD calls;
+pass an object id such as `{ tenantId, userId }` to `findById`, `updateById`,
+`existsById`, or `deleteById`. Composite ids are not yet supported for relation
+foreign keys or join tables.
+`@ManyToOne` and owning `@OneToOne` create a nullable foreign-key column using
+`joinColumn` or the default `<property>_<targetIdColumn>` name. Owning
+`@OneToOne` also creates a unique index for that foreign key in migrations. Use
+`foreignKeyName`, `onDelete`, and `onUpdate` to control generated constraints.
+Inverse `@OneToOne` and `@OneToMany` require `mappedBy`; `@ManyToMany` creates a
+join table. Use `cascade` with
 `[CascadeType.PERSIST]` or `CascadeType.REMOVE` for loaded or lazy relation
 values that should be persisted or removed with the owning operation. For
 `@ManyToMany`, `PERSIST` can persist id-less targets and `REMOVE` deletes target
@@ -205,6 +224,26 @@ const user = await users.findById(1, {
 const teams = await teamRepository.findAll({ relations: { members: true } });
 ```
 
+Sort or project base reads without creating derived methods:
+
+```ts
+const activeUsers = await users.findAll({
+  orderBy: [
+    { property: 'createdAt', direction: 'desc' },
+    { property: 'id' },
+  ],
+});
+
+const names = await users.findAll({
+  select: ['id', 'name'] as const,
+  orderBy: [{ property: 'name' }],
+});
+```
+
+`select` projection returns plain partial rows keyed by entity property names.
+It cannot be combined with relation loading, and cursor pagination currently
+requires full rows so cursor tokens can include the ordered values.
+
 Use `@EntityGraph` on a repository method when that method should always load
 specific relations. Undecorated query methods do not receive entity graph
 metadata. NPA follows a MikroORM-style loaded type pattern: declare graph-loaded
@@ -248,8 +287,8 @@ export abstract class UserRepository extends NPARepository<User, number> {
 }
 ```
 
-Supported relation predicates include `@ManyToOne`, `@OneToMany({ mappedBy })`,
-and `@ManyToMany({ joinTable })` target columns.
+Supported relation predicates include `@ManyToOne`, `@OneToOne`,
+`@OneToMany({ mappedBy })`, and `@ManyToMany({ joinTable })` target columns.
 
 ## Custom SQL with `@Query`
 
@@ -289,8 +328,8 @@ Use `npa db push` for Prisma `db push`-style local synchronization: NPA reads
 exported `@Entity` classes and applies the current schema directly to the
 database. It creates missing tables, adds missing columns, changes supported
 column types/nullability, drops columns removed from the entity, creates normal
-and unique indexes, creates `@ManyToOne` foreign keys, and creates
-`@ManyToMany({ joinTable })` tables with foreign keys. Destructive statements
+and unique indexes, creates `@ManyToOne` and owning `@OneToOne` foreign keys,
+and creates `@ManyToMany({ joinTable })` tables with foreign keys. Destructive statements
 such as dropped columns and risky type/nullability changes require
 `--allow-destructive` before they can be applied. Rename detection is explicit:
 pass `--rename table:old_name=new_name` or
@@ -523,8 +562,8 @@ abstract class MemberRepository extends NPARepository<Member, number> {
 }
 ```
 
-Cursor order currently supports scalar columns and `ManyToOne` relation chains
-such as `OrderByTeamLabelAsc`. `OneToMany` and `ManyToMany` cursor order fail
+Cursor order currently supports scalar columns and to-one relation chains such
+as `OrderByTeamLabelAsc`. `OneToMany` and `ManyToMany` cursor order fail
 fast because the aggregation policy is not part of the v1 contract. `after` and
 `before` cannot be used together, and `Top`/`First` cannot be combined with
 `Pageable`.
@@ -595,10 +634,10 @@ The current codebase is suitable for demos, but the following items are needed
 before treating NPA as a fuller ORM:
 
 - Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
-- Query API: add runtime sort, projection/select clauses, aggregate/groupBy support, and bulk update by condition.
+- Query API: add aggregate/groupBy support and bulk update by condition.
 - Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
 - Relations: support eager fetch strategies and safer relation mutation helpers.
-- Entity mapping: add composite keys, enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
+- Entity mapping: add composite relation keys, enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks and richer DDL for defaults/generated columns/enums.
 - Transactions: add savepoint-backed nested transactions, more propagation modes, and stricter read-only/flush behavior.
 - Operations: add SQL logging, slow-query hooks, metrics/tracing, normalized driver errors, retry policy hooks, and clearer connection ownership docs.

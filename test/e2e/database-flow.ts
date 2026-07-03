@@ -2,7 +2,7 @@ import * as mysql from "mysql2/promise";
 import { Pool } from "pg";
 import { MySqlContainer } from "@testcontainers/mysql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import { Column, Entity, Id, Version } from "../../src";
+import { Column, Entity, Id, Pageable, Version } from "../../src";
 import { PostgresqlConnection, PostgresqlTransactionManager, createPostgresqlDerivedQueryRepository } from "../../packages/pg/src";
 import { MysqlConnection, MysqlTransactionManager, createMysqlDerivedQueryRepository, type MysqlTransactionConnection } from "../../packages/mysql/src";
 import { expect } from "@jest/globals";
@@ -191,6 +191,34 @@ async function assertRepositoryContract(
 
   expect(await repository.count()).toEqual(3);
   expect((await repository.findAll()).map((row) => row.product_name).sort()).toEqual(["chair beta", "desk beta", "desk gamma"]);
+  expect((await repository.findAll({
+    orderBy: [{ property: "createdAt", direction: "desc" }],
+  })).map((row) => row.product_name)).toEqual([
+    "desk gamma",
+    "chair beta",
+    "desk beta",
+  ]);
+
+  const projection = await repository.findAll({
+    select: ["id", "name"],
+    orderBy: [{ property: "name", direction: "asc" }],
+  });
+  expect(projection).toEqual([
+    { id: expect.any(Number), name: "chair beta" },
+    { id: expect.any(Number), name: "desk beta" },
+    { id: expect.any(Number), name: "desk gamma" },
+  ]);
+
+  const projectionPage = await repository.findAll({
+    select: ["id", "name"],
+    orderBy: [{ property: "name", direction: "asc" }],
+    pageable: Pageable.offset(0, 2),
+  });
+  expect(projectionPage.content).toEqual([
+    { id: expect.any(Number), name: "chair beta" },
+    { id: expect.any(Number), name: "desk beta" },
+  ]);
+  expect(projectionPage.totalElements).toEqual(3);
 
   const desks =
     await repository.findTop2ByNameContainingAndPriceGreaterThanOrderByCreatedAtDesc(

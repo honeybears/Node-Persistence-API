@@ -46,6 +46,7 @@ export interface RelationOptions {
 }
 
 export enum RelationKind {
+  ONE_TO_ONE = "ONE_TO_ONE",
   ONE_TO_MANY = "ONE_TO_MANY",
   MANY_TO_ONE = "MANY_TO_ONE",
   MANY_TO_MANY = "MANY_TO_MANY",
@@ -106,6 +107,7 @@ export interface EntityMetadata {
   indexes: IndexMetadata[];
   relations: RelationMetadata[];
   primaryColumn?: ColumnMetadata;
+  primaryColumns: ColumnMetadata[];
   versionColumn?: ColumnMetadata;
   createdAtColumn?: ColumnMetadata;
   updatedAtColumn?: ColumnMetadata;

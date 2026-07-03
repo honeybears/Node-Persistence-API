@@ -34,7 +34,8 @@ export function isManyToOneRelationProperty(
 ): boolean {
   return property.kind === NPALanguageEntityPropertyKind.RELATION &&
     (property.relationKind === undefined ||
-      property.relationKind === NPALanguageEntityRelationKind.MANY_TO_ONE);
+      property.relationKind === NPALanguageEntityRelationKind.MANY_TO_ONE ||
+      property.relationKind === NPALanguageEntityRelationKind.ONE_TO_ONE);
 }
 
 export function findEntitySchema(

@@ -878,10 +878,11 @@ function entityTable(
   byClassName: Map<string, MigrationEntitySchema>,
 ): MigrationTableSchema {
   const columns = new Map(entity.columns.map((column) => [column.columnName, column]));
+  const indexes = [...(entity.indexes ?? [])];
   const foreignKeys: MigrationForeignKeySchema[] = [];
 
   for (const relation of entity.relations ?? []) {
-    if (relation.kind !== MigrationRelationKind.MANY_TO_ONE) {
+    if (!isOwningForeignKeyRelation(relation)) {
       continue;
     }
 
@@ -889,7 +890,7 @@ function entityTable(
 
     if (!target) {
       throw new Error(
-        `@ManyToOne for ${entity.className}.${relation.propertyName} targets unknown entity ${relation.targetClassName}.`,
+        `@${relation.kind === MigrationRelationKind.ONE_TO_ONE ? "OneToOne" : "ManyToOne"} for ${entity.className}.${relation.propertyName} targets unknown entity ${relation.targetClassName}.`,
       );
     }
 
@@ -901,6 +902,12 @@ function entityTable(
     };
 
     columns.set(joinColumn, column);
+    if (relation.kind === MigrationRelationKind.ONE_TO_ONE) {
+      indexes.push({
+        columns: [joinColumn],
+        unique: true,
+      });
+    }
     foreignKeys.push({
       name: relation.foreignKeyName ?? foreignKeyName(entity.tableName, [joinColumn], target.tableName),
       columns: [joinColumn],
@@ -916,9 +923,14 @@ function entityTable(
     tableName: entity.tableName,
     schema: entity.schema,
     columns: [...columns.values()],
-    indexes: entity.indexes ?? [],
+    indexes,
     foreignKeys,
   };
+}
+
+function isOwningForeignKeyRelation(relation: { kind: MigrationRelationKind; mappedBy?: string }): boolean {
+  return relation.kind === MigrationRelationKind.MANY_TO_ONE ||
+    (relation.kind === MigrationRelationKind.ONE_TO_ONE && !relation.mappedBy);
 }
 
 function buildJoinTables(entities: MigrationEntitySchema[]): MigrationTableSchema[] {

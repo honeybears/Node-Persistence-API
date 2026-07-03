@@ -1,7 +1,7 @@
 import {
   mysqlEntityColumnProperties,
   normalizeMysqlPropertyValue,
-  mysqlPrimaryKeyProperty,
+  mysqlPrimaryKeyProperties,
   mysqlPropertyToColumn,
   mysqlVersionProperty,
   quoteMysqlTable,
@@ -15,7 +15,7 @@ export function compileMysqlInsert<TEntity extends object>(
   const entries = withDefaultVersionEntry(
     definedEntries(entity, options).filter(
       ([property, value]) =>
-        property !== mysqlPrimaryKeyProperty(options) ||
+        !mysqlPrimaryKeyProperties(options).includes(property) ||
         (value !== null && value !== undefined),
     ),
     options,
@@ -44,10 +44,10 @@ export function compileMysqlUpdate<TEntity extends object>(
 ): MysqlCompiledQuery {
   assertId(id);
 
-  const primaryKey = mysqlPrimaryKeyProperty(options);
+  const primaryKeys = mysqlPrimaryKeyProperties(options);
   const version = mysqlVersionProperty(options);
   const entries = definedEntries(patch, options).filter(
-    ([property]) => property !== primaryKey && property !== version,
+    ([property]) => !primaryKeys.includes(property) && property !== version,
   );
 
   if (entries.length === 0) {
@@ -58,12 +58,12 @@ export function compileMysqlUpdate<TEntity extends object>(
   const assignments = entries.map(
     ([property]) => `${mysqlPropertyToColumn(property, options)} = ?`,
   );
-  values.push(id);
+  const where = compileIdWhere(id, options, values);
 
   return {
     text: `UPDATE ${quoteMysqlTable(options)} SET ${assignments.join(
       ", ",
-    )} WHERE ${mysqlPropertyToColumn(primaryKey, options)} = ?`,
+    )} WHERE ${where}`,
     values,
   };
 }
@@ -77,10 +77,10 @@ export function compileMysqlVersionedUpdate<TEntity extends object>(
   assertId(id);
   assertVersion(expectedVersion);
 
-  const primaryKey = mysqlPrimaryKeyProperty(options);
+  const primaryKeys = mysqlPrimaryKeyProperties(options);
   const version = requireMysqlVersionProperty(options);
   const entries = definedEntries(patch, options).filter(
-    ([property]) => property !== primaryKey && property !== version,
+    ([property]) => !primaryKeys.includes(property) && property !== version,
   );
 
   if (entries.length === 0) {
@@ -93,12 +93,13 @@ export function compileMysqlVersionedUpdate<TEntity extends object>(
   );
   const versionColumn = mysqlPropertyToColumn(version, options);
   assignments.push(`${versionColumn} = ${versionColumn} + 1`);
-  values.push(id, expectedVersion);
+  const where = compileIdWhere(id, options, values);
+  values.push(expectedVersion);
 
   return {
     text: `UPDATE ${quoteMysqlTable(options)} SET ${assignments.join(
       ", ",
-    )} WHERE ${mysqlPropertyToColumn(primaryKey, options)} = ? AND ${versionColumn} = ?`,
+    )} WHERE ${where} AND ${versionColumn} = ?`,
     values,
   };
 }
@@ -108,13 +109,11 @@ export function compileMysqlDeleteById(
   options: MysqlQueryCompilerOptions,
 ): MysqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
-    text: `DELETE FROM ${quoteMysqlTable(options)} WHERE ${mysqlPropertyToColumn(
-      mysqlPrimaryKeyProperty(options),
-      options,
-    )} = ?`,
-    values: [id],
+    text: `DELETE FROM ${quoteMysqlTable(options)} WHERE ${compileIdWhere(id, options, values)}`,
+    values,
   };
 }
 
@@ -123,13 +122,11 @@ export function compileMysqlFindById(
   options: MysqlQueryCompilerOptions,
 ): MysqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
-    text: `SELECT * FROM ${quoteMysqlTable(options)} WHERE ${mysqlPropertyToColumn(
-      mysqlPrimaryKeyProperty(options),
-      options,
-    )} = ? LIMIT 1`,
-    values: [id],
+    text: `SELECT * FROM ${quoteMysqlTable(options)} WHERE ${compileIdWhere(id, options, values)} LIMIT 1`,
+    values,
   };
 }
 
@@ -138,15 +135,13 @@ export function compileMysqlExistsById(
   options: MysqlQueryCompilerOptions,
 ): MysqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
     text: `SELECT EXISTS(SELECT 1 FROM ${quoteMysqlTable(
       options,
-    )} WHERE ${mysqlPropertyToColumn(
-      mysqlPrimaryKeyProperty(options),
-      options,
-    )} = ?) AS \`exists\``,
-    values: [id],
+    )} WHERE ${compileIdWhere(id, options, values)}) AS \`exists\``,
+    values,
   };
 }
 
@@ -181,7 +176,17 @@ export function getMysqlPrimaryKeyValue<TEntity extends object>(
   entity: TEntity,
   options: MysqlQueryCompilerOptions,
 ): unknown {
-  return (entity as Record<string, unknown>)[mysqlPrimaryKeyProperty(options)];
+  const record = entity as Record<string, unknown>;
+  const primaryKeys = mysqlPrimaryKeyProperties(options);
+
+  if (primaryKeys.length === 1) {
+    return record[primaryKeys[0]];
+  }
+
+  const entries = primaryKeys.map((property) => [property, record[property]] as const);
+  return entries.some(([, value]) => value === null || value === undefined)
+    ? undefined
+    : Object.fromEntries(entries);
 }
 
 function withDefaultVersionEntry(
@@ -245,4 +250,38 @@ function assertId(id: unknown): void {
   if (id === null || id === undefined) {
     throw new Error("Primary key value is required.");
   }
+}
+
+function compileIdWhere(
+  id: unknown,
+  options: MysqlQueryCompilerOptions,
+  values: unknown[],
+): string {
+  return primaryKeyValueEntries(id, options).map(([property, value]) => {
+    values.push(value);
+    return `${mysqlPropertyToColumn(property, options)} = ?`;
+  }).join(" AND ");
+}
+
+function primaryKeyValueEntries(
+  id: unknown,
+  options: MysqlQueryCompilerOptions,
+): Array<[string, unknown]> {
+  const primaryKeys = mysqlPrimaryKeyProperties(options);
+
+  if (primaryKeys.length === 1) {
+    assertId(id);
+    return [[primaryKeys[0], id]];
+  }
+
+  if (id === null || id === undefined || typeof id !== "object") {
+    throw new Error("Composite primary key value must be an object.");
+  }
+
+  const record = id as Record<string, unknown>;
+  return primaryKeys.map((property) => {
+    const value = record[property];
+    assertId(value);
+    return [property, value];
+  });
 }

@@ -1,5 +1,6 @@
 import {
   CascadeType,
+  ColumnMetadata,
   EntityMetadata,
   RelationKind,
   RelationMetadata,
@@ -12,13 +13,7 @@ export interface RelationLoadTree {
 
 export function relationJoinColumnName(relation: RelationMetadata): string {
   const targetMetadata = getEntityMetadata(relation.target());
-  const targetPrimaryColumn = targetMetadata.primaryColumn;
-
-  if (!targetPrimaryColumn) {
-    throw new Error(
-      `Relation ${relation.propertyName} targets entity ${targetMetadata.target.name} without an @Id column.`,
-    );
-  }
+  const targetPrimaryColumn = requireSinglePrimaryColumn(targetMetadata, `Relation ${relation.propertyName}`);
 
   return relation.joinColumn ?? `${relation.propertyName}_${targetPrimaryColumn.columnName}`;
 }
@@ -32,13 +27,7 @@ export function readRelationForeignKeyValue(
   }
 
   const targetMetadata = getEntityMetadata(relation.target());
-  const targetPrimaryColumn = targetMetadata.primaryColumn;
-
-  if (!targetPrimaryColumn) {
-    throw new Error(
-      `Relation ${relation.propertyName} targets entity ${targetMetadata.target.name} without an @Id column.`,
-    );
-  }
+  const targetPrimaryColumn = requireSinglePrimaryColumn(targetMetadata, `Relation ${relation.propertyName}`);
 
   const record = value as Record<string, unknown>;
 
@@ -69,13 +58,24 @@ export function readEntityPrimaryValue(
   entity: object,
   metadata: EntityMetadata,
 ): unknown {
-  const primaryColumn = metadata.primaryColumn;
+  const primaryColumns = primaryColumnsOf(metadata);
 
-  if (!primaryColumn) {
+  if (primaryColumns.length === 0) {
     throw new Error(`Entity ${metadata.target.name} requires an @Id column.`);
   }
 
   const record = entity as Record<string, unknown>;
+
+  if (primaryColumns.length > 1) {
+    return Object.fromEntries(primaryColumns.map((primaryColumn) => [
+      primaryColumn.propertyName,
+      primaryColumn.propertyName in record
+        ? record[primaryColumn.propertyName]
+        : record[primaryColumn.columnName],
+    ]));
+  }
+
+  const primaryColumn = primaryColumns[0];
 
   if (primaryColumn.propertyName in record) {
     return record[primaryColumn.propertyName];
@@ -94,11 +94,7 @@ export function defaultJoinTableName(
 export function joinTableColumnName(
   entity: EntityMetadata,
 ): string {
-  const primaryColumn = entity.primaryColumn;
-
-  if (!primaryColumn) {
-    throw new Error(`Entity ${entity.target.name} requires an @Id column.`);
-  }
+  const primaryColumn = requireSinglePrimaryColumn(entity, `Entity ${entity.target.name}`);
 
   const prefix = `${toSnakeCase(entity.target.name)}_`;
 
@@ -107,10 +103,19 @@ export function joinTableColumnName(
     : `${prefix}${primaryColumn.columnName}`;
 }
 
+export function primaryColumnsOf(metadata: EntityMetadata): ColumnMetadata[] {
+  return metadata.primaryColumns.length > 0
+    ? metadata.primaryColumns
+    : metadata.primaryColumn
+      ? [metadata.primaryColumn]
+      : [];
+}
+
 export function needsOrmDelete(metadata: EntityMetadata): boolean {
   return metadata.relations.some((relation) =>
     relation.kind === RelationKind.MANY_TO_MANY ||
-    (relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval) ||
+    ((relation.kind === RelationKind.ONE_TO_MANY ||
+      relation.kind === RelationKind.ONE_TO_ONE) && relation.orphanRemoval) ||
     relation.cascade.includes(CascadeType.REMOVE),
   );
 }
@@ -129,7 +134,8 @@ export function removeCascadeRelationTree(
 
   for (const relation of metadata.relations) {
     if (
-      !(relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval) &&
+      !((relation.kind === RelationKind.ONE_TO_MANY ||
+        relation.kind === RelationKind.ONE_TO_ONE) && relation.orphanRemoval) &&
       !relation.cascade.includes(CascadeType.REMOVE)
     ) {
       continue;
@@ -149,6 +155,23 @@ function toSnakeCase(value: string): string {
   return value.replace(/[A-Z]/g, (match, index) =>
     `${index === 0 ? "" : "_"}${match.toLowerCase()}`,
   );
+}
+
+function requireSinglePrimaryColumn(
+  metadata: EntityMetadata,
+  context: string,
+): ColumnMetadata {
+  const primaryColumns = primaryColumnsOf(metadata);
+
+  if (primaryColumns.length === 0) {
+    throw new Error(`${context} targets entity ${metadata.target.name} without an @Id column.`);
+  }
+
+  if (primaryColumns.length > 1) {
+    throw new Error(`${context} targets entity ${metadata.target.name} with a composite @Id, which is not supported for relations yet.`);
+  }
+
+  return primaryColumns[0];
 }
 
 function requireRelationPrimaryValue(

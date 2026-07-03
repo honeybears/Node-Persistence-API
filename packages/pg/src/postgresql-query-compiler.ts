@@ -17,6 +17,7 @@ import {
 import {
   normalizePropertyValue,
   primaryKeyProperty,
+  quoteIdentifier,
 } from "./postgresql-identifiers";
 import { PostgresqlRelationQueryBuilder } from "./postgresql-relation-query";
 
@@ -39,7 +40,7 @@ class QueryCompiler {
 
   compile(): PostgresqlCompiledQuery {
     const { query } = this.invocation;
-    this.relationQuery.prepare(query);
+    this.relationQuery.prepare(query, this.invocation.select ?? []);
     const page = this.compilePage(query);
     const from = this.relationQuery.selectFrom();
 
@@ -242,6 +243,10 @@ class QueryCompiler {
       return undefined;
     }
 
+    if (this.invocation.select?.length) {
+      throw new Error("Cursor pagination does not support select projections yet.");
+    }
+
     const reverse = Boolean(pageable.before);
     const queryOrders = reverse ? reverseOrders(orders) : orders;
     const cursorOrders = queryOrders.map((order, index) => {
@@ -294,6 +299,13 @@ class QueryCompiler {
   }
 
   private selectTarget(query: ParsedQueryMethod): string {
+    if (this.invocation.select?.length) {
+      const projection = this.invocation.select.map((property) =>
+        `${this.column(property)} AS ${quoteIdentifier(property)}`,
+      ).join(", ");
+      return query.distinct === true ? `DISTINCT ${projection}` : projection;
+    }
+
     const target = this.relationQuery.selectTarget();
     return query.distinct === true ? `DISTINCT ${target}` : target;
   }

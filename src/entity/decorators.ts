@@ -88,6 +88,15 @@ export function OneToMany(
   };
 }
 
+export function OneToOne(
+  target: () => EntityTarget,
+  options: RelationOptions = {},
+): PropertyDecorator {
+  return (source, propertyKey) => {
+    registerRelation(source, propertyKey, RelationKind.ONE_TO_ONE, target, options);
+  };
+}
+
 export function ManyToOne(
   target: () => EntityTarget,
   options: RelationOptions = {},

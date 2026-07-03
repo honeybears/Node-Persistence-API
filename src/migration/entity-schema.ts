@@ -376,6 +376,11 @@ function findNextRelationDecorator(
 ): { decoratorName: string; kind: MigrationRelationKind; index: number } | undefined {
   const candidates: Array<{ decoratorName: string; kind: MigrationRelationKind; index: number }> = [
     {
+      decoratorName: "OneToOne",
+      kind: MigrationRelationKind.ONE_TO_ONE,
+      index: source.indexOf("@OneToOne", cursor),
+    },
+    {
       decoratorName: "OneToMany",
       kind: MigrationRelationKind.ONE_TO_MANY,
       index: source.indexOf("@OneToMany", cursor),

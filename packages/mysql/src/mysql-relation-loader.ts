@@ -36,8 +36,10 @@ export async function loadMysqlRelations<TEntity extends object>(
   for (const { relation, nested } of relationSelections) {
     let loaded: object[];
 
-    if (relation.kind === RelationKind.MANY_TO_ONE) {
+    if (isOwningToOneRelation(relation)) {
       loaded = await loadManyToOne(entities, relation, options);
+    } else if (relation.kind === RelationKind.ONE_TO_ONE) {
+      loaded = await loadOneToOne(entities, metadata, relation, options);
     } else if (relation.kind === RelationKind.ONE_TO_MANY) {
       loaded = await loadOneToMany(entities, metadata, relation, options);
     } else if (relation.kind === RelationKind.MANY_TO_MANY) {
@@ -191,6 +193,31 @@ async function loadManyToOne<TEntity extends object>(
   return flattenRelationValues(entities, relation);
 }
 
+async function loadOneToOne<TEntity extends object>(
+  entities: TEntity[],
+  metadata: EntityMetadata,
+  relation: RelationMetadata,
+  options: MysqlRelationLoadOptions<TEntity>,
+): Promise<object[]> {
+  if (!relation.mappedBy) {
+    throw new Error(`@OneToOne ${metadata.target.name}.${relation.propertyName} requires mappedBy.`);
+  }
+
+  const targetMetadata = getEntityMetadata(relation.target());
+  const targetRelation = findMappedOwningToOne(metadata, targetMetadata, relation);
+  const sourceIds = uniqueValues(entities.map((entity) => readEntityPrimaryValue(entity, metadata)));
+  const joinColumn = relationJoinColumnName(targetRelation);
+  const rows = await selectRowsByColumn(options, targetMetadata, joinColumn, sourceIds);
+  const rowsBySourceId = groupRows(rows, joinColumn);
+
+  for (const entity of entities) {
+    const id = readEntityPrimaryValue(entity, metadata);
+    writeValue(entity, relation.propertyName, rowsBySourceId.get(id)?.[0] ?? null);
+  }
+
+  return flattenRelationValues(entities, relation);
+}
+
 async function loadOneToMany<TEntity extends object>(
   entities: TEntity[],
   metadata: EntityMetadata,
@@ -221,6 +248,27 @@ async function loadOneToMany<TEntity extends object>(
   }
 
   return flattenRelationValues(entities, relation);
+}
+
+function findMappedOwningToOne(
+  sourceMetadata: EntityMetadata,
+  targetMetadata: EntityMetadata,
+  relation: RelationMetadata,
+): RelationMetadata {
+  const targetRelation = targetMetadata.relations.find((candidate) =>
+    isOwningToOneRelation(candidate) && candidate.propertyName === relation.mappedBy,
+  );
+
+  if (!targetRelation) {
+    throw new Error(`@OneToOne ${sourceMetadata.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+  }
+
+  return targetRelation;
+}
+
+function isOwningToOneRelation(relation: RelationMetadata): boolean {
+  return relation.kind === RelationKind.MANY_TO_ONE ||
+    (relation.kind === RelationKind.ONE_TO_ONE && !relation.mappedBy);
 }
 
 async function loadManyToMany<TEntity extends object>(

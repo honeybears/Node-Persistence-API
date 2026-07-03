@@ -38,7 +38,7 @@ function parseEntitySchemasFromText(source, filePath = "") {
 
 function parseEntityProperties(classBody) {
   const properties = [];
-  const fieldPattern = /((?:\s*@(Id|Column|Version|OneToMany|ManyToOne|ManyToMany)(?:\([\s\S]*?\))?\s*)+)\s*(?:public\s+|protected\s+|private\s+|readonly\s+|declare\s+)*([A-Za-z_]\w*)[!?]?\s*:\s*([^;=\n]+)/g;
+  const fieldPattern = /((?:\s*@(Id|Column|Version|OneToOne|OneToMany|ManyToOne|ManyToMany)(?:\([\s\S]*?\))?\s*)+)\s*(?:public\s+|protected\s+|private\s+|readonly\s+|declare\s+)*([A-Za-z_]\w*)[!?]?\s*:\s*([^;=\n]+)/g;
   let match;
 
   while ((match = fieldPattern.exec(classBody)) !== null) {
@@ -74,7 +74,7 @@ function parseEntityProperties(classBody) {
 }
 
 function parseRelationProperty(decorators, propertyName) {
-  const relation = /@(OneToMany|ManyToOne|ManyToMany)\s*\(\s*\(\s*\)\s*=>\s*([A-Za-z_]\w*)/.exec(decorators);
+  const relation = /@(OneToOne|OneToMany|ManyToOne|ManyToMany)\s*\(\s*\(\s*\)\s*=>\s*([A-Za-z_]\w*)/.exec(decorators);
 
   if (!relation) {
     return undefined;
@@ -92,6 +92,10 @@ function parseRelationProperty(decorators, propertyName) {
 function toRelationKind(decoratorName) {
   if (decoratorName === "OneToMany") {
     return "ONE_TO_MANY";
+  }
+
+  if (decoratorName === "OneToOne") {
+    return "ONE_TO_ONE";
   }
 
   if (decoratorName === "ManyToOne") {

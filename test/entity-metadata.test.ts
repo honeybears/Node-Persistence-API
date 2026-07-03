@@ -10,6 +10,7 @@ import {
   ManyToMany,
   ManyToOne,
   NPARepository,
+  OneToOne,
   OneToMany,
   RelationKind,
   UpdatedAt,
@@ -87,6 +88,36 @@ class User {
 class GeneratedIdUser {
   @Id({ generationStrategy: GenerationStrategy.UUID })
   id!: string;
+}
+
+@Entity({ name: "account_profiles" })
+class AccountProfile {
+  @Id({ name: "profile_id" })
+  id!: number;
+
+  @Column()
+  label!: string;
+}
+
+@Entity({ name: "accounts" })
+class Account {
+  @Id({ name: "account_id" })
+  id!: number;
+
+  @OneToOne(() => AccountProfile, { joinColumn: "profile_id" })
+  profile?: AccountProfile;
+}
+
+@Entity({ name: "tenant_users" })
+class TenantUser {
+  @Id({ name: "tenant_id" })
+  tenantId!: string;
+
+  @Id({ name: "user_id" })
+  userId!: string;
+
+  @Column()
+  name!: string;
 }
 
 describe("entity metadata", () => {
@@ -217,6 +248,22 @@ describe("entity metadata", () => {
         propertyName: "id",
         generationStrategy: GenerationStrategy.UUID,
       });
+    });
+
+    test("registers one-to-one and composite primary key metadata", () => {
+      expect(getEntityMetadata(Account).relations[0]).toMatchObject({
+        propertyName: "profile",
+        kind: RelationKind.ONE_TO_ONE,
+        joinColumn: "profile_id",
+      });
+
+      const metadata = getEntityMetadata(TenantUser);
+
+      expect(metadata.primaryColumn?.propertyName).toEqual("tenantId");
+      expect(metadata.primaryColumns.map((column) => column.propertyName)).toEqual([
+        "tenantId",
+        "userId",
+      ]);
     });
   });
 

@@ -27,6 +27,7 @@ import {
   ManyToMany,
   ManyToOne,
   NPARepository,
+  OneToOne,
   OneToMany,
   Pageable,
   Query,
@@ -69,6 +70,18 @@ class PgPlainProduct {
   name!: string;
 }
 
+@Entity({ name: "tenant_users" })
+class PgTenantUser {
+  @Id({ name: "tenant_id" })
+  tenantId!: string;
+
+  @Id({ name: "user_id" })
+  userId!: string;
+
+  @Column()
+  name!: string;
+}
+
 @Entity({ name: "products" })
 class PgTimestampedProduct {
   @Id({ name: "product_id" })
@@ -99,6 +112,30 @@ class PgOrganization {
 
   @Column()
   name!: string;
+}
+
+@Entity({ name: "app_users" })
+class PgAppUser {
+  @Id({ name: "user_id" })
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @OneToOne(() => PgAppUserProfile, { mappedBy: "user" })
+  profile!: unknown;
+}
+
+@Entity({ name: "app_user_profiles" })
+class PgAppUserProfile {
+  @Id({ name: "profile_id" })
+  id!: number;
+
+  @Column()
+  bio!: string;
+
+  @OneToOne(() => PgAppUser, { joinColumn: "user_id" })
+  user!: unknown;
 }
 
 @Entity({ name: "teams" })
@@ -435,6 +472,32 @@ describe("PostgreSQL adapter", () => {
     expect(
       compilePostgresqlQuery(
         {
+          query: parseQueryMethod("findByProfileBioOrderByProfileBioAsc"),
+          args: ["hello"],
+        },
+        { entity: PgAppUser },
+      ),
+    ).toEqual({
+      text: 'SELECT "t0".* FROM "app_users" AS "t0" JOIN "app_user_profiles" AS "t1" ON "t1"."user_id" = "t0"."user_id" WHERE ("t1"."bio" = $1) ORDER BY "t1"."bio" ASC',
+      values: ["hello"],
+    });
+
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByUserNameOrderByUserNameAsc"),
+          args: ["kim"],
+        },
+        { entity: PgAppUserProfile },
+      ),
+    ).toEqual({
+      text: 'SELECT "t0".* FROM "app_user_profiles" AS "t0" JOIN "app_users" AS "t1" ON "t0"."user_id" = "t1"."user_id" WHERE ("t1"."name" = $1) ORDER BY "t1"."name" ASC',
+      values: ["kim"],
+    });
+
+    expect(
+      compilePostgresqlQuery(
+        {
           query: parseQueryMethod("findByNameOrderByTeamLabelAsc"),
           args: ["kim"],
           pageable: Pageable.cursor({ size: 2 }),
@@ -727,6 +790,25 @@ describe("PostgreSQL adapter", () => {
       text: 'SELECT * FROM "users"',
       values: [],
     });
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: {
+            methodName: "findAll",
+            action: "find",
+            predicate: [],
+            orderBy: [{ property: "name", direction: "desc" }],
+            parameterCount: 0,
+          },
+          args: [],
+          select: ["id", "name"],
+        },
+        { entity: PgProduct },
+      ),
+    ).toEqual({
+      text: 'SELECT "product_id" AS "id", "product_name" AS "name" FROM "products" ORDER BY "product_name" DESC',
+      values: [],
+    });
     expect(compilePostgresqlCount(options)).toEqual({
       text: 'SELECT COUNT(*)::int AS "count" FROM "users"',
       values: [],
@@ -734,6 +816,24 @@ describe("PostgreSQL adapter", () => {
     expect(compilePostgresqlDeleteAll(options)).toEqual({
       text: 'DELETE FROM "users"',
       values: [],
+    });
+  });
+
+  test("compiles PostgreSQL composite primary key CRUD SQL", () => {
+    const options = { entity: PgTenantUser };
+    const id = { tenantId: "t1", userId: "u1" };
+
+    expect(compilePostgresqlFindById(id, options)).toEqual({
+      text: 'SELECT * FROM "tenant_users" WHERE "tenant_id" = $1 AND "user_id" = $2 LIMIT 1',
+      values: ["t1", "u1"],
+    });
+    expect(compilePostgresqlUpdate(id, { name: "kim" }, options)).toEqual({
+      text: 'UPDATE "tenant_users" SET "name" = $1 WHERE "tenant_id" = $2 AND "user_id" = $3 RETURNING *',
+      values: ["kim", "t1", "u1"],
+    });
+    expect(compilePostgresqlDeleteById(id, options)).toEqual({
+      text: 'DELETE FROM "tenant_users" WHERE "tenant_id" = $1 AND "user_id" = $2',
+      values: ["t1", "u1"],
     });
   });
 

@@ -16,7 +16,7 @@ import { RepositoryMethodInvocation } from "./types";
 export class InMemoryRepositoryExecutor<TEntity extends object> {
   constructor(private readonly rows: TEntity[]) {}
 
-  execute = ({ query, args, pageable }: RepositoryMethodInvocation): unknown => {
+  execute = ({ query, args, pageable, select }: RepositoryMethodInvocation): unknown => {
     const matchedRows = this.rows.filter((row) =>
       matchesPredicate(row, query.predicate, args, query.allIgnoreCase === true),
     );
@@ -30,23 +30,30 @@ export class InMemoryRepositoryExecutor<TEntity extends object> {
     const selectedRows = pageable
       ? applyPageable(sortedRows, query.orderBy, pageable)
       : applyLimit(sortedRows, query.limit);
+    const projectedRows = select?.length
+      ? selectedRows.map((row) => projectRow(row, select))
+      : selectedRows;
 
     switch (query.action) {
       case "find":
         if (pageable && isOffsetPageable(pageable)) {
-          return createPage(selectedRows, pageable, resultRows.length);
+          return createPage(projectedRows, pageable, resultRows.length);
         }
 
         if (pageable && isCursorPageable(pageable)) {
+          if (select?.length) {
+            throw new Error("Cursor pagination does not support select projections yet.");
+          }
+
           return createCursorWindow(
             selectedRows,
             cursorMetadata(query.orderBy, pageable),
           );
         }
 
-        return selectedRows;
+        return projectedRows;
       case "findOne":
-        return selectedRows[0] ?? null;
+        return projectedRows[0] ?? null;
       case "exists":
         return matchedRows.length > 0;
       case "count":
@@ -331,6 +338,16 @@ function isAfterCursor<TEntity extends object>(
 
 function distinctRows<TEntity>(rows: TEntity[]): TEntity[] {
   return [...new Set(rows)];
+}
+
+function projectRow<TEntity extends object>(
+  row: TEntity,
+  select: readonly string[],
+): Partial<TEntity> {
+  const record = row as Record<string, unknown>;
+  return Object.fromEntries(
+    select.map((property) => [property, record[property]]),
+  ) as Partial<TEntity>;
 }
 
 function getProperty<TEntity extends object>(

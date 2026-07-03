@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToOne, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -37,6 +37,18 @@ abstract class ProductRepository extends NPARepository<Product, number> {
 
 Repository(Product)(ProductRepository);
 
+@Entity({ name: "tenant_users" })
+class TenantUser {
+  @Id({ name: "tenant_id" })
+  tenantId!: string;
+
+  @Id({ name: "user_id" })
+  userId!: string;
+
+  @Column()
+  name!: string;
+}
+
 @Entity({ name: "organizations" })
 class Organization {
   @Id({ name: "organization_id" })
@@ -44,6 +56,30 @@ class Organization {
 
   @Column()
   name!: string;
+}
+
+@Entity({ name: "app_users" })
+class AppUser {
+  @Id({ name: "user_id" })
+  id!: number;
+
+  @Column()
+  name!: string;
+
+  @OneToOne(() => AppUserProfile, { mappedBy: "user" })
+  profile!: unknown;
+}
+
+@Entity({ name: "app_user_profiles" })
+class AppUserProfile {
+  @Id({ name: "profile_id" })
+  id!: number;
+
+  @Column()
+  bio!: string;
+
+  @OneToOne(() => AppUser, { joinColumn: "user_id" })
+  user!: unknown;
 }
 
 @Entity({ name: "teams" })
@@ -375,6 +411,30 @@ describe("MySQL adapter", () => {
 
     expect(compileMysqlQuery(
         {
+          query: parseQueryMethod("findByProfileBioOrderByProfileBioAsc"),
+          args: ["hello"],
+        },
+        { entity: AppUser },
+      )).toEqual({
+        text:
+          "SELECT `t0`.* FROM `app_users` AS `t0` JOIN `app_user_profiles` AS `t1` ON `t1`.`user_id` = `t0`.`user_id` WHERE (`t1`.`bio` = ?) ORDER BY `t1`.`bio` ASC",
+        values: ["hello"],
+      });
+
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByUserNameOrderByUserNameAsc"),
+          args: ["kim"],
+        },
+        { entity: AppUserProfile },
+      )).toEqual({
+        text:
+          "SELECT `t0`.* FROM `app_user_profiles` AS `t0` JOIN `app_users` AS `t1` ON `t0`.`user_id` = `t1`.`user_id` WHERE (`t1`.`name` = ?) ORDER BY `t1`.`name` ASC",
+        values: ["kim"],
+      });
+
+    expect(compileMysqlQuery(
+        {
           query: parseQueryMethod("findByNameOrderByTeamLabelAsc"),
           args: ["kim"],
           pageable: Pageable.cursor({ size: 2 }),
@@ -538,6 +598,24 @@ describe("MySQL adapter", () => {
       text: "SELECT * FROM `shop`.`products`",
       values: [],
     });
+    expect(compileMysqlQuery(
+        {
+          query: {
+            methodName: "findAll",
+            action: "find",
+            predicate: [],
+            orderBy: [{ property: "name", direction: "desc" }],
+            parameterCount: 0,
+          },
+          args: [],
+          select: ["id", "name"],
+        },
+        { entity: Product },
+      )).toEqual({
+        text:
+          "SELECT `product_id` AS `id`, `product_name` AS `name` FROM `shop`.`products` ORDER BY `product_name` DESC",
+        values: [],
+      });
     expect(compileMysqlCount({ entity: Product })).toEqual({
       text: "SELECT COUNT(*) AS `count` FROM `shop`.`products`",
       values: [],
@@ -545,6 +623,27 @@ describe("MySQL adapter", () => {
     expect(compileMysqlDeleteAll({ entity: Product })).toEqual({
       text: "DELETE FROM `shop`.`products`",
       values: [],
+    });
+  });
+
+  test("compiles MySQL composite primary key CRUD SQL", () => {
+    const options = { entity: TenantUser };
+    const id = { tenantId: "t1", userId: "u1" };
+
+    expect(compileMysqlFindById(id, options)).toEqual({
+      text:
+        "SELECT * FROM `tenant_users` WHERE `tenant_id` = ? AND `user_id` = ? LIMIT 1",
+      values: ["t1", "u1"],
+    });
+    expect(compileMysqlUpdate(id, { name: "kim" }, options)).toEqual({
+      text:
+        "UPDATE `tenant_users` SET `name` = ? WHERE `tenant_id` = ? AND `user_id` = ?",
+      values: ["kim", "t1", "u1"],
+    });
+    expect(compileMysqlDeleteById(id, options)).toEqual({
+      text:
+        "DELETE FROM `tenant_users` WHERE `tenant_id` = ? AND `user_id` = ?",
+      values: ["t1", "u1"],
     });
   });
 

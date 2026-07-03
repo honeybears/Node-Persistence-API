@@ -29,6 +29,7 @@ export interface RepositoryMethodInvocation {
   query: ParsedQueryMethod;
   args: unknown[];
   pageable?: PageRequest;
+  select?: readonly string[];
   entityGraph?: NPAEntityGraphMetadata;
 }
 
@@ -51,9 +52,25 @@ export interface NPALoadOptions<TEntity extends object = object> {
   relations?: NPARelationLoad<TEntity>;
 }
 
+export type NPAOrderDirection = "asc" | "desc";
+
+export interface NPAOrderBy<TEntity extends object = object> {
+  property: keyof TEntity & string;
+  direction?: NPAOrderDirection;
+}
+
+export type NPASelect<TEntity extends object = object> = readonly (keyof TEntity & string)[];
+
+export type NPAProjection<
+  TEntity extends object,
+  TSelect extends NPASelect<TEntity>,
+> = Pick<TEntity, TSelect[number]>;
+
 export interface NPAFindOptions<TEntity extends object = object>
   extends NPALoadOptions<TEntity> {
   pageable?: PageRequest;
+  orderBy?: readonly NPAOrderBy<TEntity>[];
+  select?: NPASelect<TEntity>;
 }
 
 export abstract class NPARepository<TEntity extends object, TId = unknown> {
@@ -61,6 +78,15 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
     id: TId,
     options?: NPALoadOptions<TEntity>,
   ): Promise<TEntity | null>;
+  abstract findAll<TSelect extends NPASelect<TEntity>>(
+    options: NPAFindOptions<TEntity> & { select: TSelect; pageable: OffsetPageable },
+  ): Promise<Page<NPAProjection<TEntity, TSelect>>>;
+  abstract findAll<TSelect extends NPASelect<TEntity>>(
+    options: NPAFindOptions<TEntity> & { select: TSelect; pageable: CursorPageable },
+  ): Promise<CursorPage<NPAProjection<TEntity, TSelect>>>;
+  abstract findAll<TSelect extends NPASelect<TEntity>>(
+    options: NPAFindOptions<TEntity> & { select: TSelect },
+  ): Promise<Array<NPAProjection<TEntity, TSelect>>>;
   abstract findAll(
     options: NPAFindOptions<TEntity> & { pageable: OffsetPageable },
   ): Promise<Page<TEntity>>;

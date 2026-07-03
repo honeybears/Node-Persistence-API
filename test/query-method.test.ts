@@ -372,6 +372,9 @@ describe("derived query methods", () => {
     abstract class UserRepository {
       @EntityGraph(["team"])
       abstract findById: (id: number) => Promise<object | null>;
+
+      @EntityGraph(["team"])
+      abstract findAll: (options?: object) => Promise<object[]>;
     }
 
     const adapter: NPARepositoryAdapter<object, number> = {
@@ -425,9 +428,18 @@ describe("derived query methods", () => {
 
     await repository.findById(1);
     await repository.findById(2, { relations: ["roles"] });
+    await repository.findAll({
+      orderBy: [{ property: "name", direction: "desc" }],
+      pageable: Pageable.offset(0, 10),
+    });
     expect(loads).toEqual([
       { relations: ["team"] },
       { relations: ["team", "roles"] },
+      {
+        relations: ["team"],
+        orderBy: [{ property: "name", direction: "desc" }],
+        pageable: Pageable.offset(0, 10),
+      },
     ]);
   });
 
@@ -610,5 +622,51 @@ describe("derived query methods", () => {
     expect(firstPage.previousCursor).toEqual(null);
     expect(secondPage.content).toEqual([rows[2], rows[3]]);
     expect(previousPage.content).toEqual([rows[0], rows[1]]);
+  });
+
+  test("executes find projections with order and offset pages in memory", () => {
+    const rows = [
+      { id: 1, name: "kim", age: 32 },
+      { id: 2, name: "lee", age: 28 },
+      { id: 3, name: "park", age: 41 },
+    ];
+    const executor = new InMemoryRepositoryExecutor(rows);
+
+    expect(
+      executor.execute({
+        query: {
+          methodName: "findAll",
+          action: "find",
+          predicate: [],
+          orderBy: [{ property: "name", direction: "desc" }],
+          parameterCount: 0,
+        },
+        args: [],
+        select: ["id", "name"],
+      }),
+    ).toEqual([
+      { id: 3, name: "park" },
+      { id: 2, name: "lee" },
+      { id: 1, name: "kim" },
+    ]);
+
+    expect(
+      executor.execute({
+        query: {
+          methodName: "findAll",
+          action: "find",
+          predicate: [],
+          orderBy: [{ property: "name", direction: "asc" }],
+          parameterCount: 0,
+        },
+        args: [],
+        select: ["name"],
+        pageable: Pageable.offset(1, 1),
+      }),
+    ).toMatchObject({
+      content: [{ name: "lee" }],
+      totalElements: 3,
+      totalPages: 3,
+    });
   });
 });

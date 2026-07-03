@@ -1,0 +1,69 @@
+# @node-persistence-api/connector-mysql
+
+MySQL runtime adapter for [Node Persistence API](https://github.com/honeybears/Node-Persistence-API).
+
+## Install
+
+```bash
+npm install @node-persistence-api/connector-mysql
+```
+
+## Usage
+
+```ts
+import mysql from 'mysql2/promise';
+import { NPA } from '@node-persistence-api/core';
+import {
+  MysqlConnection,
+  mysql as npaMysql,
+} from '@node-persistence-api/connector-mysql';
+import './repositories';
+import { UserRepository } from './user.repository';
+
+const pool = mysql.createPool(process.env.DATABASE_URL);
+const connection = new MysqlConnection(pool);
+
+const npa = new NPA({
+  adapter: npaMysql({ queryable: connection }),
+});
+
+const users = npa.get(UserRepository);
+
+await users.insert({ name: 'kim' });
+await users.findById(1);
+await users.findByNameContainingIgnoreCase('ki');
+await users.findAll({ select: ['id', 'name'] as const, orderBy: [{ property: 'name' }] });
+```
+
+Use `MysqlTransactionManager` when repository calls must share a database
+transaction:
+
+```ts
+import { NPA, Transaction } from '@node-persistence-api/core';
+import {
+  MysqlTransactionManager,
+  mysql as npaMysql,
+} from '@node-persistence-api/connector-mysql';
+
+const txManager = new MysqlTransactionManager(pool);
+const npa = new NPA({
+  adapter: npaMysql({ queryable: txManager.queryable }),
+});
+
+class UserService {
+  private readonly users = npa.get(UserRepository);
+
+  @Transaction({ manager: txManager })
+  async rename(id: number, name: string): Promise<void> {
+    await this.users.updateById(id, { name });
+  }
+}
+```
+
+## Migrations
+
+```bash
+npa db push --adapter mysql --url "$DATABASE_URL" --entities "src/**/*.entity.ts"
+npa migrate dev --adapter mysql --url "$DATABASE_URL" --entities "src/**/*.entity.ts"
+npa migrate deploy --adapter mysql --url "$DATABASE_URL"
+```

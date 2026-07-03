@@ -20,6 +20,7 @@ interface MutableEntityMetadata {
   indexes: Map<string, IndexMetadata>;
   relations: Map<string, RelationMetadata>;
   primaryColumn?: ColumnMetadata;
+  primaryColumns: Map<string, ColumnMetadata>;
   versionColumn?: ColumnMetadata;
   createdAtColumn?: ColumnMetadata;
   updatedAtColumn?: ColumnMetadata;
@@ -70,7 +71,8 @@ export function registerId(
   };
 
   metadata.columns.set(propertyName, column);
-  metadata.primaryColumn = column;
+  metadata.primaryColumn ??= column;
+  metadata.primaryColumns.set(propertyName, column);
   registerColumnIndexOptions(metadata, propertyName, options);
 }
 
@@ -194,6 +196,7 @@ export function getEntityMetadata<TEntity extends object>(
     indexes: [...metadata.indexes.values()],
     relations: [...metadata.relations.values()],
     primaryColumn: metadata.primaryColumn,
+    primaryColumns: [...metadata.primaryColumns.values()],
     versionColumn: metadata.versionColumn,
     createdAtColumn: metadata.createdAtColumn,
     updatedAtColumn: metadata.updatedAtColumn,
@@ -276,6 +279,7 @@ function getOrCreateMutableMetadata(
     indexes: new Map(),
     relations: new Map(),
     primaryColumn: undefined,
+    primaryColumns: new Map(),
     versionColumn: undefined,
     createdAtColumn: undefined,
     updatedAtColumn: undefined,

@@ -157,21 +157,30 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   findAll = async (
     load?: NPAFindOptions<TEntity>,
   ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>> => {
+    if (load?.select?.length && load.relations) {
+      throw new Error("findAll select projections cannot be combined with relation loading.");
+    }
+
     if (load?.pageable) {
       return this.executePageQuery(
-        {
-          query: {
-            methodName: "findAll",
-            action: "find",
-            predicate: [],
-            orderBy: [],
-            parameterCount: 0,
-          },
-          args: [],
-          pageable: load.pageable,
-        },
+        findAllInvocation(load),
         load,
       );
+    }
+
+    if (load?.orderBy?.length || load?.select?.length) {
+      const invocation = findAllInvocation(load);
+      const query = compilePostgresqlQuery(invocation, this.options);
+      const result = await this.options.queryable.query<TEntity>(
+        query.text,
+        query.values,
+      );
+
+      if (invocation.select?.length) {
+        return result.rows;
+      }
+
+      return this.manageMany(this.attachLazy(await this.loadRelations(result.rows, load)));
     }
 
     const query = compilePostgresqlFindAll(this.options);
@@ -359,7 +368,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
 
     if (isOffsetPageable(pageable)) {
-      const rows = await this.loadRelations(result.rows, load);
+      const rows = invocation.select?.length
+        ? result.rows
+        : await this.loadRelations(result.rows, load);
       const countQuery = compilePostgresqlQuery(
         {
           query: {
@@ -375,7 +386,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
       const countResult = await this.options.queryable.query(countQuery.text, countQuery.values);
 
       return createPage(
-        this.manageMany(this.attachLazy(rows)),
+        invocation.select?.length
+          ? rows
+          : this.manageMany(this.attachLazy(rows)),
         pageable,
         Number(countResult.rows[0]?.count ?? 0),
       );
@@ -749,6 +762,38 @@ function toEntityGraphLoad<TEntity extends object>(
   entityGraph: NPAEntityGraphMetadata<TEntity> | undefined,
 ): NPALoadOptions<TEntity> | undefined {
   return entityGraph ? { relations: entityGraph.relations } : undefined;
+}
+
+function findAllInvocation<TEntity extends object>(
+  load: NPAFindOptions<TEntity> | undefined,
+): RepositoryMethodInvocation {
+  return {
+    query: {
+      methodName: "findAll",
+      action: "find",
+      predicate: [],
+      orderBy: (load?.orderBy ?? []).map((order) => ({
+        property: order.property,
+        direction: normalizeOrderDirection(order.direction),
+      })),
+      parameterCount: 0,
+    },
+    args: [],
+    pageable: load?.pageable,
+    select: load?.select,
+  };
+}
+
+function normalizeOrderDirection(direction: unknown): "asc" | "desc" {
+  if (direction === undefined) {
+    return "asc";
+  }
+
+  if (direction === "asc" || direction === "desc") {
+    return direction;
+  }
+
+  throw new Error(`Unsupported order direction "${String(direction)}".`);
 }
 
 function readExpectedVersionFromPatch(

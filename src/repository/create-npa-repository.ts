@@ -86,11 +86,14 @@ function mergeLoadOptions<TEntity extends object>(
   const rightRelations = right.relations;
 
   if (leftRelations === true || rightRelations === true) {
-    return { relations: true };
+    return { ...right, relations: true };
   }
 
   if (Array.isArray(leftRelations) && Array.isArray(rightRelations)) {
-    return { relations: [...new Set([...leftRelations, ...rightRelations])] };
+    return {
+      ...right,
+      relations: [...new Set([...leftRelations, ...rightRelations])],
+    };
   }
 
   return {

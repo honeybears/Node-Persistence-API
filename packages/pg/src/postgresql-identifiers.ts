@@ -2,9 +2,11 @@ import {
   ColumnMetadata,
   EntityMetadata,
   getOptionalEntityMetadata,
+  primaryColumnsOf,
   readRelationForeignKeyValue,
   relationJoinColumnName,
   RelationKind,
+  RelationMetadata,
 } from "@node-persistence-api/core";
 import { PostgresqlQueryCompilerOptions } from "./types";
 
@@ -43,7 +45,17 @@ export function propertyToColumnName(
 export function primaryKeyProperty(
   options: PostgresqlQueryCompilerOptions,
 ): string {
-  return options.primaryKey ?? getMetadata(options)?.primaryColumn?.propertyName ?? "id";
+  return options.primaryKey ?? primaryKeyProperties(options)[0] ?? "id";
+}
+
+export function primaryKeyProperties(
+  options: PostgresqlQueryCompilerOptions,
+): string[] {
+  const metadata = getMetadata(options);
+  const metadataPrimaryKeys = metadata
+    ? primaryColumnsOf(metadata).map((column) => column.propertyName)
+    : [];
+  return metadataPrimaryKeys.length > 0 ? metadataPrimaryKeys : [options.primaryKey ?? "id"];
 }
 
 export function versionProperty(
@@ -64,7 +76,7 @@ export function entityColumnProperties(
   return [
     ...metadata.columns.map((column) => column.propertyName),
     ...metadata.relations
-      .filter((relation) => relation.kind === RelationKind.MANY_TO_ONE)
+      .filter(isOwningToOneRelation)
       .map((relation) => relation.propertyName),
   ];
 }
@@ -75,7 +87,7 @@ export function normalizePropertyValue(
   options: PostgresqlQueryCompilerOptions,
 ): unknown {
   const relation = getMetadata(options)?.relations.find(
-    (candidate) => candidate.kind === RelationKind.MANY_TO_ONE && candidate.propertyName === property,
+    (candidate) => isOwningToOneRelation(candidate) && candidate.propertyName === property,
   );
 
   return relation ? readRelationForeignKeyValue(value, relation) : value;
@@ -88,7 +100,7 @@ function resolveColumnName(
   return (
     options.columns?.[property] ??
     findColumn(property, options)?.columnName ??
-    findManyToOneRelation(property, options)?.joinColumn ??
+    findOwningToOneRelation(property, options)?.joinColumn ??
     findRelationJoinColumnName(property, options) ??
     toSnakeCase(property)
   );
@@ -103,12 +115,12 @@ function findColumn(
   );
 }
 
-function findManyToOneRelation(
+function findOwningToOneRelation(
   property: string,
   options: PostgresqlQueryCompilerOptions,
 ) {
   return getMetadata(options)?.relations.find(
-    (relation) => relation.kind === RelationKind.MANY_TO_ONE && relation.propertyName === property,
+    (relation) => isOwningToOneRelation(relation) && relation.propertyName === property,
   );
 }
 
@@ -116,9 +128,14 @@ function findRelationJoinColumnName(
   property: string,
   options: PostgresqlQueryCompilerOptions,
 ): string | undefined {
-  const relation = findManyToOneRelation(property, options);
+  const relation = findOwningToOneRelation(property, options);
 
   return relation ? relationJoinColumnName(relation) : undefined;
+}
+
+function isOwningToOneRelation(relation: RelationMetadata): boolean {
+  return relation.kind === RelationKind.MANY_TO_ONE ||
+    (relation.kind === RelationKind.ONE_TO_ONE && !relation.mappedBy);
 }
 
 function getMetadata(

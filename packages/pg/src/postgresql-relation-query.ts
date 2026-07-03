@@ -52,13 +52,17 @@ export class PostgresqlRelationQueryBuilder {
 
   constructor(private readonly options: PostgresqlQueryCompilerOptions) {}
 
-  prepare(query: ParsedQueryMethod): void {
+  prepare(query: ParsedQueryMethod, extraProperties: readonly string[] = []): void {
     for (const part of query.predicate) {
       this.prepareProperty(part.condition.property);
     }
 
     for (const order of query.orderBy) {
       this.prepareProperty(order.property);
+    }
+
+    for (const property of extraProperties) {
+      this.prepareProperty(property);
     }
   }
 
@@ -127,8 +131,8 @@ export class PostgresqlRelationQueryBuilder {
       };
     }
 
-    if (relationPath.segments.some((segment) => segment.relation.kind !== RelationKind.MANY_TO_ONE)) {
-      throw new Error("Cursor pagination only supports scalar or @ManyToOne OrderBy properties.");
+    if (relationPath.segments.some((segment) => !isToOneRelation(segment.relation))) {
+      throw new Error("Cursor pagination only supports scalar or @ManyToOne OrderBy properties; @OneToOne is also supported.");
     }
 
     const expression = this.column(property);
@@ -196,7 +200,7 @@ export class PostgresqlRelationQueryBuilder {
       this.options.columns?.[property] ??
         this.metadata?.columns.some((column) => column.propertyName === property) ??
         this.metadata?.relations.some(
-          (relation) => relation.kind === RelationKind.MANY_TO_ONE && relation.propertyName === property,
+          (relation) => isOwningToOneRelation(relation) && relation.propertyName === property,
         ),
     );
   }
@@ -242,7 +246,7 @@ export class PostgresqlRelationQueryBuilder {
     const targetAlias = this.nextQuotedAlias();
     const targetTable = qualifiedTable(targetMetadata);
 
-    if (relation.kind === RelationKind.MANY_TO_ONE) {
+    if (isOwningToOneRelation(relation)) {
       const targetPrimary = requirePrimaryColumn(targetMetadata);
       const sourceJoinColumn = relationJoinColumnName(relation);
       const joinPredicate = `${qualifiedColumn(sourceAlias, sourceJoinColumn)} = ${qualifiedColumn(targetAlias, targetPrimary.columnName)}`;
@@ -258,9 +262,9 @@ export class PostgresqlRelationQueryBuilder {
       };
     }
 
-    if (relation.kind === RelationKind.ONE_TO_MANY) {
+    if (relation.kind === RelationKind.ONE_TO_MANY || relation.kind === RelationKind.ONE_TO_ONE) {
       const sourcePrimary = requirePrimaryColumn(sourceMetadata);
-      const targetRelation = findMappedManyToOne(sourceMetadata, targetMetadata, relation);
+      const targetRelation = findMappedOwningToOne(sourceMetadata, targetMetadata, relation);
       const targetJoinColumn = relationJoinColumnName(targetRelation);
       const joinPredicate = `${qualifiedColumn(targetAlias, targetJoinColumn)} = ${qualifiedColumn(sourceAlias, sourcePrimary.columnName)}`;
 
@@ -366,22 +370,32 @@ function requirePrimaryColumn(metadata: EntityMetadata) {
   return metadata.primaryColumn;
 }
 
-function findMappedManyToOne(
+function findMappedOwningToOne(
   sourceMetadata: EntityMetadata,
   targetMetadata: EntityMetadata,
   relation: RelationMetadata,
 ): RelationMetadata {
   if (!relation.mappedBy) {
-    throw new Error(`@OneToMany ${sourceMetadata.target.name}.${relation.propertyName} requires mappedBy.`);
+    throw new Error(`@${relation.kind === RelationKind.ONE_TO_ONE ? "OneToOne" : "OneToMany"} ${sourceMetadata.target.name}.${relation.propertyName} requires mappedBy.`);
   }
 
   const targetRelation = targetMetadata.relations.find(
-    (candidate) => candidate.kind === RelationKind.MANY_TO_ONE && candidate.propertyName === relation.mappedBy,
+    (candidate) => isOwningToOneRelation(candidate) && candidate.propertyName === relation.mappedBy,
   );
 
   if (!targetRelation) {
-    throw new Error(`@OneToMany ${sourceMetadata.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+    throw new Error(`@${relation.kind === RelationKind.ONE_TO_ONE ? "OneToOne" : "OneToMany"} ${sourceMetadata.target.name}.${relation.propertyName} mappedBy relation was not found.`);
   }
 
   return targetRelation;
+}
+
+function isOwningToOneRelation(relation: RelationMetadata): boolean {
+  return relation.kind === RelationKind.MANY_TO_ONE ||
+    (relation.kind === RelationKind.ONE_TO_ONE && !relation.mappedBy);
+}
+
+function isToOneRelation(relation: RelationMetadata): boolean {
+  return relation.kind === RelationKind.MANY_TO_ONE ||
+    relation.kind === RelationKind.ONE_TO_ONE;
 }

@@ -13,6 +13,7 @@ import { RepositoryMethodInvocation } from "@node-persistence-api/core";
 import {
   mysqlPrimaryKeyProperty,
   normalizeMysqlPropertyValue,
+  quoteMysqlIdentifier,
 } from "./mysql-identifiers";
 import { MysqlRelationQueryBuilder } from "./mysql-relation-query";
 import { MysqlCompiledQuery, MysqlQueryCompilerOptions } from "./types";
@@ -36,7 +37,7 @@ class MysqlQueryCompiler {
 
   compile(): MysqlCompiledQuery {
     const { query } = this.invocation;
-    this.relationQuery.prepare(query);
+    this.relationQuery.prepare(query, this.invocation.select ?? []);
     const page = this.compilePage(query);
     const from = this.relationQuery.selectFrom();
 
@@ -252,6 +253,10 @@ class MysqlQueryCompiler {
       return undefined;
     }
 
+    if (this.invocation.select?.length) {
+      throw new Error("Cursor pagination does not support select projections yet.");
+    }
+
     const reverse = Boolean(pageable.before);
     const queryOrders = reverse ? reverseOrders(orders) : orders;
     const cursorOrders = queryOrders.map((order, index) => {
@@ -304,6 +309,13 @@ class MysqlQueryCompiler {
   }
 
   private selectTarget(query: ParsedQueryMethod): string {
+    if (this.invocation.select?.length) {
+      const projection = this.invocation.select.map((property) =>
+        `${this.column(property)} AS ${quoteMysqlIdentifier(property)}`,
+      ).join(", ");
+      return query.distinct === true ? `DISTINCT ${projection}` : projection;
+    }
+
     const target = this.relationQuery.selectTarget();
     return query.distinct === true ? `DISTINCT ${target}` : target;
   }

@@ -316,8 +316,9 @@ export class PersistenceContext {
 
     await this.removeCascadeRelations(
       managed,
-      [RelationKind.ONE_TO_MANY, RelationKind.MANY_TO_MANY],
+      [RelationKind.ONE_TO_MANY, RelationKind.MANY_TO_MANY, RelationKind.ONE_TO_ONE],
       seen,
+      (relation) => relation.kind !== RelationKind.ONE_TO_ONE || Boolean(relation.mappedBy),
     );
 
     if (this.newEntities.delete(managed.entity)) {
@@ -328,8 +329,9 @@ export class PersistenceContext {
     this.removedEntities.add(managed.entity);
     await this.removeCascadeRelations(
       managed,
-      [RelationKind.MANY_TO_ONE],
+      [RelationKind.MANY_TO_ONE, RelationKind.ONE_TO_ONE],
       seen,
+      (relation) => relation.kind !== RelationKind.ONE_TO_ONE || !relation.mappedBy,
     );
   }
 
@@ -337,12 +339,14 @@ export class PersistenceContext {
     managed: ManagedEntity,
     kinds: RelationKind[],
     seen: Set<object>,
+    filter: (relation: RelationMetadata) => boolean = () => true,
   ): Promise<void> {
     for (const relation of managed.metadata.relations) {
       const shouldCascadeRemove = hasCascade(relation, CascadeType.REMOVE) ||
-        (relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval);
+        ((relation.kind === RelationKind.ONE_TO_MANY ||
+          relation.kind === RelationKind.ONE_TO_ONE) && relation.orphanRemoval);
 
-      if (!kinds.includes(relation.kind) || !shouldCascadeRemove) {
+      if (!kinds.includes(relation.kind) || !filter(relation) || !shouldCascadeRemove) {
         continue;
       }
 
@@ -393,7 +397,7 @@ export class PersistenceContext {
       }
 
       if (!flushed) {
-        throw new Error("Cannot flush persisted entity graph with unresolved @ManyToOne dependencies.");
+        throw new Error("Cannot flush persisted entity graph with unresolved to-one dependencies.");
       }
     }
 
@@ -721,7 +725,7 @@ function canInsertNow(
   newEntities: Set<object>,
 ): boolean {
   for (const relation of managed.metadata.relations) {
-    if (relation.kind !== RelationKind.MANY_TO_ONE) {
+    if (!isOwningToOneRelation(relation)) {
       continue;
     }
 
@@ -790,7 +794,7 @@ function diffEntity<TEntity extends object>(
   }
 
   for (const relation of metadata.relations) {
-    if (relation.kind !== RelationKind.MANY_TO_ONE) {
+    if (!isOwningToOneRelation(relation)) {
       continue;
     }
 
@@ -818,7 +822,7 @@ function snapshotEntity(
       snapshotValue(readColumnValue(entity, column)),
     ] as const),
     ...metadata.relations
-      .filter((relation) => relation.kind === RelationKind.MANY_TO_ONE)
+      .filter(isOwningToOneRelation)
       .map((relation) => [
         relation.propertyName,
         snapshotValue(readRelationForeignKeyForSnapshot(entity, relation)),
@@ -870,7 +874,7 @@ function mergeDatabaseValues(
   }
 
   for (const relation of metadata.relations) {
-    if (relation.kind !== RelationKind.MANY_TO_ONE) {
+    if (!isOwningToOneRelation(relation)) {
       continue;
     }
 
@@ -1067,6 +1071,11 @@ function findMappedByManyToOneRelation(
   }
 
   return targetRelation;
+}
+
+function isOwningToOneRelation(relation: RelationMetadata): boolean {
+  return relation.kind === RelationKind.MANY_TO_ONE ||
+    (relation.kind === RelationKind.ONE_TO_ONE && !relation.mappedBy);
 }
 
 function isSameIdSet(

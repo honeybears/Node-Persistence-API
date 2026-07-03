@@ -408,6 +408,60 @@ describe("migration metadata", () => {
     }
   });
 
+  test("parses one-to-one relations and creates unique owning foreign keys", () => {
+    const schemas = parseEntitySource(`
+      import { Column, Entity, Id, OneToOne } from "@npa/test";
+
+      @Entity({ name: "users" })
+      class User {
+        @Id({ name: "user_id" })
+        id!: number;
+
+        @OneToOne(() => Profile, { mappedBy: "user" })
+        profile!: Profile;
+      }
+
+      @Entity({ name: "profiles" })
+      class Profile {
+        @Id({ name: "profile_id" })
+        id!: number;
+
+        @Column()
+        bio!: string;
+
+        @OneToOne(() => User, { joinColumn: "user_id", foreignKeyName: "fk_profiles_user" })
+        user!: User;
+      }
+    `);
+    const profile = schemas.find((schema) => schema.className === "Profile");
+
+    expect(profile?.relations).toEqual([
+      {
+        propertyName: "user",
+        kind: MigrationRelationKind.ONE_TO_ONE,
+        targetClassName: "User",
+        mappedBy: undefined,
+        joinColumn: "user_id",
+        joinTable: undefined,
+        foreignKeyName: "fk_profiles_user",
+        onDelete: undefined,
+        onUpdate: undefined,
+      },
+    ]);
+    expect(compilePostgresqlMigrationStatements({ entities: schemas })).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "uidx_profiles_user_id" ON "profiles" ("user_id")',
+    );
+    expect(compilePostgresqlMigrationStatements({ entities: schemas })).toContain(
+      'ALTER TABLE "profiles" ADD CONSTRAINT "fk_profiles_user" FOREIGN KEY ("user_id") REFERENCES "users" ("user_id")',
+    );
+    expect(compileMysqlMigrationStatements({ entities: schemas })).toContain(
+      "CREATE UNIQUE INDEX `uidx_profiles_user_id` ON `profiles` (`user_id`)",
+    );
+    expect(compileMysqlMigrationStatements({ entities: schemas })).toContain(
+      "ALTER TABLE `profiles` ADD CONSTRAINT `fk_profiles_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)",
+    );
+  });
+
   test("compiles PostgreSQL and MySQL schema migration SQL", () => {
     const schemas = discoverEntitySchemas(makeMigrationFixture(), [
       "src/**/*.entity.ts",

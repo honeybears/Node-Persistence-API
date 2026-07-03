@@ -1,4 +1,4 @@
-import { CascadeType, Column, CursorPage, Entity, Id, ManyToOne, ManyToMany, NPARepository, Page, Pageable, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
+import { CascadeType, Column, CursorPage, Entity, Id, ManyToOne, ManyToMany, NPARepository, OneToOne, Page, Pageable, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
 import { assertRepositoryContract, createProductEntity, databaseAdapters, runDatabaseFlow, startContainerOrSkip, uniqueTableName } from "./database-flow";
 import { describe, expect, test } from "@jest/globals";
 
@@ -25,6 +25,12 @@ type RelationRepository = NPARepository<Row, unknown> & {
     name: string,
     pageable: ReturnType<typeof Pageable.cursor>,
   ): Promise<CursorPage<Row>>;
+};
+type OneToOneRepository = NPARepository<Row, unknown> & {
+  existsByProfileBio(bio: string): Promise<boolean>;
+  findByProfileBio(bio: string): Promise<Row[]>;
+  findByProfileBioOrderByProfileBioAsc(bio: string): Promise<Row[]>;
+  findByUserName(name: string): Promise<Row[]>;
 };
 
 describe("database adapter E2E", () => {
@@ -156,6 +162,148 @@ describe("database adapter E2E", () => {
               await adapter.executeSql(
                 queryable,
                 `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(teamTableName)}`,
+              );
+            }
+          } finally {
+            if (queryable) {
+              await adapter.closeQueryable(queryable);
+            }
+            await container.stop();
+          }
+        }
+      },
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
+      `runs ${adapter.name} one-to-one relation E2E against a real database`,
+      async () => {
+        const userTableName = uniqueTableName(`${adapter.tablePrefix}_one_to_one_users`);
+        const profileTableName = uniqueTableName(`${adapter.tablePrefix}_one_to_one_profiles`);
+        const container = await startContainerOrSkip(adapter.createContainer());
+
+        if (!container) {
+          return;
+        }
+
+        let queryable;
+
+        try {
+          queryable = await adapter.createQueryable(container);
+          await adapter.executeSql(queryable, createOneToOneUserTableSql(adapter, userTableName));
+          await adapter.executeSql(
+            queryable,
+            createOneToOneProfileTableSql(adapter, profileTableName, userTableName),
+          );
+
+          const { User, Profile } = createOneToOneEntities(userTableName, profileTableName);
+          const users = adapter.createRepository({ entity: User, queryable }) as OneToOneRepository;
+          const profiles = adapter.createRepository({ entity: Profile, queryable }) as OneToOneRepository;
+
+          const kim = await users.insert({ name: "kim" });
+          const lee = await users.insert({ name: "lee" });
+          const kimProfile = await profiles.insert({
+            bio: "builder",
+            user: { id: kim.user_id },
+          });
+          await profiles.insert({
+            bio: "designer",
+            user: { id: lee.user_id },
+          });
+
+          expect((await users.findByProfileBio("builder")).map((row) => row.name)).toEqual(["kim"]);
+          expect(await users.existsByProfileBio("designer")).toEqual(true);
+          expect((await users.findByProfileBioOrderByProfileBioAsc("builder"))
+              .map((row) => row.name)).toEqual(["kim"]);
+          expect((await profiles.findByUserName("lee")).map((row) => row.bio)).toEqual(["designer"]);
+
+          const loadedProfile = await profiles.findById(kimProfile.profile_id, {
+            relations: { user: true },
+          });
+          expect((loadedProfile?.user as Row).name).toEqual("kim");
+
+          const loadedUser = await users.findById(kim.user_id, {
+            relations: { profile: true },
+          });
+          expect((loadedUser?.profile as Row).bio).toEqual("builder");
+
+          const lazyUser = await users.findById(lee.user_id);
+          const lazyProfileFromUser = await (lazyUser?.profile as Promise<Row>);
+          expect(lazyProfileFromUser.bio).toEqual("designer");
+
+          const lazyProfile = await profiles.findById(kimProfile.profile_id);
+          const lazyUserFromProfile = await (lazyProfile?.user as Promise<Row>);
+          expect(lazyUserFromProfile.name).toEqual("kim");
+        } finally {
+          try {
+            if (queryable) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(profileTableName)}`,
+              );
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(userTableName)}`,
+              );
+            }
+          } finally {
+            if (queryable) {
+              await adapter.closeQueryable(queryable);
+            }
+            await container.stop();
+          }
+        }
+      },
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
+      `runs ${adapter.name} composite primary key CRUD E2E against a real database`,
+      async () => {
+        const tableName = uniqueTableName(`${adapter.tablePrefix}_tenant_users`);
+        const container = await startContainerOrSkip(adapter.createContainer());
+
+        if (!container) {
+          return;
+        }
+
+        let queryable;
+
+        try {
+          queryable = await adapter.createQueryable(container);
+          await adapter.executeSql(queryable, createCompositeTenantUserTableSql(adapter, tableName));
+
+          const TenantUser = createCompositeTenantUserEntity(tableName);
+          const users = adapter.createRepository({ entity: TenantUser, queryable }) as NPARepository<Row, Row>;
+          const id = { tenantId: "tenant-a", userId: "user-1" };
+
+          await users.insert({ ...id, name: "kim" });
+
+          expect(await users.existsById(id)).toEqual(true);
+          expect(await users.findById(id)).toMatchObject({
+            tenant_id: "tenant-a",
+            user_id: "user-1",
+            name: "kim",
+          });
+
+          expect(await users.updateById(id, { name: "lee" })).toMatchObject({
+            tenant_id: "tenant-a",
+            user_id: "user-1",
+            name: "lee",
+          });
+          expect(await users.findById(id)).toMatchObject({ name: "lee" });
+          expect(await users.deleteById(id)).toEqual(1);
+          expect(await users.existsById(id)).toEqual(false);
+        } finally {
+          try {
+            if (queryable) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(tableName)}`,
               );
             }
           } finally {
@@ -690,6 +838,103 @@ function insertMemberRoleSql(adapter, tableName, memberId, roleId) {
     INSERT INTO ${table} (member_id, role_id)
     VALUES (${Number(memberId)}, ${Number(roleId)})
   `;
+}
+
+function createOneToOneUserTableSql(adapter, tableName) {
+  const table = adapter.quoteIdentifier(tableName);
+
+  if (adapter.adapterName === "mysql") {
+    return `
+      CREATE TABLE ${table} (
+        user_id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL
+      )
+    `;
+  }
+
+  return `
+    CREATE TABLE ${table} (
+      user_id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL
+    )
+  `;
+}
+
+function createOneToOneProfileTableSql(adapter, tableName, userTableName) {
+  const table = adapter.quoteIdentifier(tableName);
+  const userTable = adapter.quoteIdentifier(userTableName);
+
+  if (adapter.adapterName === "mysql") {
+    return `
+      CREATE TABLE ${table} (
+        profile_id INT AUTO_INCREMENT PRIMARY KEY,
+        bio VARCHAR(255) NOT NULL,
+        user_id INT NOT NULL UNIQUE,
+        FOREIGN KEY (user_id) REFERENCES ${userTable} (user_id)
+      )
+    `;
+  }
+
+  return `
+    CREATE TABLE ${table} (
+      profile_id SERIAL PRIMARY KEY,
+      bio TEXT NOT NULL,
+      user_id INTEGER NOT NULL UNIQUE,
+      FOREIGN KEY (user_id) REFERENCES ${userTable} (user_id)
+    )
+  `;
+}
+
+function createOneToOneEntities(userTableName, profileTableName) {
+  class User {}
+  class Profile {}
+
+  Id({ name: "user_id" })(User.prototype, "id");
+  Column()(User.prototype, "name");
+  OneToOne(() => Profile, { mappedBy: "user" })(User.prototype, "profile");
+  Entity({ name: userTableName })(User);
+
+  Id({ name: "profile_id" })(Profile.prototype, "id");
+  Column()(Profile.prototype, "bio");
+  OneToOne(() => User, { joinColumn: "user_id" })(Profile.prototype, "user");
+  Entity({ name: profileTableName })(Profile);
+
+  return { User, Profile };
+}
+
+function createCompositeTenantUserTableSql(adapter, tableName) {
+  const table = adapter.quoteIdentifier(tableName);
+
+  if (adapter.adapterName === "mysql") {
+    return `
+      CREATE TABLE ${table} (
+        tenant_id VARCHAR(64) NOT NULL,
+        user_id VARCHAR(64) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        PRIMARY KEY (tenant_id, user_id)
+      )
+    `;
+  }
+
+  return `
+    CREATE TABLE ${table} (
+      tenant_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      PRIMARY KEY (tenant_id, user_id)
+    )
+  `;
+}
+
+function createCompositeTenantUserEntity(tableName) {
+  class TenantUser {}
+
+  Id({ name: "tenant_id" })(TenantUser.prototype, "tenantId");
+  Id({ name: "user_id" })(TenantUser.prototype, "userId");
+  Column()(TenantUser.prototype, "name");
+  Entity({ name: tableName })(TenantUser);
+
+  return TenantUser;
 }
 
 function createCascadeTeamMemberEntities(

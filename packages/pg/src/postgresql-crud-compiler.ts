@@ -4,6 +4,7 @@ import {
 } from "./types";
 import {
   entityColumnProperties,
+  primaryKeyProperties as resolvePrimaryKeyProperties,
   primaryKeyProperty as resolvePrimaryKeyProperty,
   normalizePropertyValue,
   propertyToColumn,
@@ -18,7 +19,7 @@ export function compilePostgresqlInsert<TEntity extends object>(
   const entries = withDefaultVersionEntry(
     definedEntries(entity, options).filter(
       ([property, value]) =>
-        property !== resolvePrimaryKeyProperty(options) ||
+        !resolvePrimaryKeyProperties(options).includes(property) ||
         (value !== null && value !== undefined),
     ),
     options,
@@ -47,10 +48,10 @@ export function compilePostgresqlUpdate<TEntity extends object>(
 ): PostgresqlCompiledQuery {
   assertId(id);
 
-  const primaryKey = resolvePrimaryKeyProperty(options);
+  const primaryKeys = resolvePrimaryKeyProperties(options);
   const version = resolveVersionProperty(options);
   const entries = definedEntries(patch, options).filter(
-    ([property]) => property !== primaryKey && property !== version,
+    ([property]) => !primaryKeys.includes(property) && property !== version,
   );
 
   if (entries.length === 0) {
@@ -61,14 +62,12 @@ export function compilePostgresqlUpdate<TEntity extends object>(
   const assignments = entries.map(
     ([property], index) => `${propertyToColumn(property, options)} = $${index + 1}`,
   );
-  values.push(id);
+  const where = compileIdWhere(id, options, values);
 
   return {
     text: `UPDATE ${quoteTable(options)} SET ${assignments.join(
       ", ",
-    )} WHERE ${propertyToColumn(primaryKey, options)} = $${
-      values.length
-    } RETURNING *`,
+    )} WHERE ${where} RETURNING *`,
     values,
   };
 }
@@ -82,10 +81,10 @@ export function compilePostgresqlVersionedUpdate<TEntity extends object>(
   assertId(id);
   assertVersion(expectedVersion);
 
-  const primaryKey = resolvePrimaryKeyProperty(options);
+  const primaryKeys = resolvePrimaryKeyProperties(options);
   const version = requireVersionProperty(options);
   const entries = definedEntries(patch, options).filter(
-    ([property]) => property !== primaryKey && property !== version,
+    ([property]) => !primaryKeys.includes(property) && property !== version,
   );
 
   if (entries.length === 0) {
@@ -98,14 +97,13 @@ export function compilePostgresqlVersionedUpdate<TEntity extends object>(
   );
   const versionColumn = propertyToColumn(version, options);
   assignments.push(`${versionColumn} = ${versionColumn} + 1`);
-  values.push(id, expectedVersion);
+  const where = compileIdWhere(id, options, values);
+  values.push(expectedVersion);
 
   return {
     text: `UPDATE ${quoteTable(options)} SET ${assignments.join(
       ", ",
-    )} WHERE ${propertyToColumn(primaryKey, options)} = $${
-      values.length - 1
-    } AND ${versionColumn} = $${values.length} RETURNING *`,
+    )} WHERE ${where} AND ${versionColumn} = $${values.length} RETURNING *`,
     values,
   };
 }
@@ -115,13 +113,11 @@ export function compilePostgresqlDeleteById(
   options: PostgresqlQueryCompilerOptions,
 ): PostgresqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
-    text: `DELETE FROM ${quoteTable(options)} WHERE ${propertyToColumn(
-      primaryKeyProperty(options),
-      options,
-    )} = $1`,
-    values: [id],
+    text: `DELETE FROM ${quoteTable(options)} WHERE ${compileIdWhere(id, options, values)}`,
+    values,
   };
 }
 
@@ -130,13 +126,11 @@ export function compilePostgresqlFindById(
   options: PostgresqlQueryCompilerOptions,
 ): PostgresqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
-    text: `SELECT * FROM ${quoteTable(options)} WHERE ${propertyToColumn(
-      primaryKeyProperty(options),
-      options,
-    )} = $1 LIMIT 1`,
-    values: [id],
+    text: `SELECT * FROM ${quoteTable(options)} WHERE ${compileIdWhere(id, options, values)} LIMIT 1`,
+    values,
   };
 }
 
@@ -145,15 +139,13 @@ export function compilePostgresqlExistsById(
   options: PostgresqlQueryCompilerOptions,
 ): PostgresqlCompiledQuery {
   assertId(id);
+  const values: unknown[] = [];
 
   return {
     text: `SELECT EXISTS(SELECT 1 FROM ${quoteTable(
       options,
-    )} WHERE ${propertyToColumn(
-      primaryKeyProperty(options),
-      options,
-    )} = $1) AS "exists"`,
-    values: [id],
+    )} WHERE ${compileIdWhere(id, options, values)}) AS "exists"`,
+    values,
   };
 }
 
@@ -194,7 +186,17 @@ export function getPrimaryKeyValue<TEntity extends object>(
   entity: TEntity,
   options: PostgresqlQueryCompilerOptions,
 ): unknown {
-  return (entity as Record<string, unknown>)[resolvePrimaryKeyProperty(options)];
+  const record = entity as Record<string, unknown>;
+  const primaryKeys = resolvePrimaryKeyProperties(options);
+
+  if (primaryKeys.length === 1) {
+    return record[primaryKeys[0]];
+  }
+
+  const entries = primaryKeys.map((property) => [property, record[property]] as const);
+  return entries.some(([, value]) => value === null || value === undefined)
+    ? undefined
+    : Object.fromEntries(entries);
 }
 
 function withDefaultVersionEntry(
@@ -238,6 +240,40 @@ function assertVersion(version: unknown): void {
   if (version === null || version === undefined) {
     throw new Error("Version value is required.");
   }
+}
+
+function compileIdWhere(
+  id: unknown,
+  options: PostgresqlQueryCompilerOptions,
+  values: unknown[],
+): string {
+  return primaryKeyValueEntries(id, options).map(([property, value]) => {
+    values.push(value);
+    return `${propertyToColumn(property, options)} = $${values.length}`;
+  }).join(" AND ");
+}
+
+function primaryKeyValueEntries(
+  id: unknown,
+  options: PostgresqlQueryCompilerOptions,
+): Array<[string, unknown]> {
+  const primaryKeys = resolvePrimaryKeyProperties(options);
+
+  if (primaryKeys.length === 1) {
+    assertId(id);
+    return [[primaryKeys[0], id]];
+  }
+
+  if (id === null || id === undefined || typeof id !== "object") {
+    throw new Error("Composite primary key value must be an object.");
+  }
+
+  const record = id as Record<string, unknown>;
+  return primaryKeys.map((property) => {
+    const value = record[property];
+    assertId(value);
+    return [property, value];
+  });
 }
 
 function definedEntries<TEntity extends object>(
