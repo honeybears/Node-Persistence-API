@@ -88,6 +88,37 @@ describe("language helpers", () => {
     expect(ordered.sortText > exact.sortText).toBeTruthy();
   });
 
+  test("adds optional Pageable signatures to non-limited find completions", () => {
+    const workspace = createWorkspace();
+    const user = workspace.entities.find((entity) => entity.className === "User");
+    const exact = getNPAQueryMethodCompletions({
+      prefix: "findByName",
+      entity: user,
+      workspace,
+      includePageable: true,
+      limit: 10,
+    }).find((completion) => completion.name === "findByName");
+    const top = getNPAQueryMethodCompletions({
+      prefix: "findTopByName",
+      entity: user,
+      workspace,
+      includePageable: true,
+      limit: 10,
+    }).find((completion) => completion.name === "findTopByName");
+
+    expect(exact).toBeTruthy();
+    expect(exact.signature).toEqual("findByName(name: string, pageable?: PageRequest): Promise<User[] | Page<User> | CursorPage<User>>;");
+    expect(exact.insertText).toEqual("findByName(${1:name}: string, ${2:pageable}?: PageRequest): Promise<User[] | Page<User> | CursorPage<User>>;");
+    expect(exact.returnType).toEqual("Promise<User[] | Page<User> | CursorPage<User>>");
+    expect(exact.parameters).toEqual([
+      { name: "name", type: "string" },
+      { name: "pageable", type: "PageRequest", optional: true },
+    ]);
+
+    expect(top).toBeTruthy();
+    expect(top.signature).toEqual("findTopByName(name: string): Promise<User[]>;");
+  });
+
   test("generates query method completions after And and Or connectors", () => {
     const workspace = createWorkspace();
     const user = workspace.entities.find((entity) => entity.className === "User");

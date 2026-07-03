@@ -1,11 +1,19 @@
 import {
+  decodeCursorValues,
+  isCursorPageable,
+  isOffsetPageable,
+  CursorQueryMetadata,
+  CursorQueryOrder,
   ParsedQueryMethod,
   QueryCondition,
   QueryOrder,
   QueryPredicatePart,
 } from "@node-persistence-api/core";
 import { RepositoryMethodInvocation } from "@node-persistence-api/core";
-import { normalizeMysqlPropertyValue } from "./mysql-identifiers";
+import {
+  mysqlPrimaryKeyProperty,
+  normalizeMysqlPropertyValue,
+} from "./mysql-identifiers";
 import { MysqlRelationQueryBuilder } from "./mysql-relation-query";
 import { MysqlCompiledQuery, MysqlQueryCompilerOptions } from "./types";
 
@@ -29,14 +37,33 @@ class MysqlQueryCompiler {
   compile(): MysqlCompiledQuery {
     const { query } = this.invocation;
     this.relationQuery.prepare(query);
+    const page = this.compilePage(query);
     const from = this.relationQuery.selectFrom();
 
     switch (query.action) {
       case "find": {
         const where = this.compileWhere(query.predicate, query.allIgnoreCase === true);
-        const orderBy = this.compileOrderBy(query.orderBy);
-        const limit = this.compileLimit(query);
-        return this.toQuery(`SELECT ${this.selectTarget(query)} FROM ${from}${where}${orderBy}${limit}`);
+        const cursorWhere = page?.cursor
+          ? this.compileCursorWhere(page.cursor)
+          : "";
+        const orderBy = page
+          ? this.compileOrderBy(page.orders)
+          : this.compileOrderBy(query.orderBy);
+        const limit = page
+          ? this.compilePageLimit(page)
+          : this.compileLimit(query);
+        const select = page?.selects.length
+          ? `${this.selectTarget(query)}, ${page.selects.join(", ")}`
+          : this.selectTarget(query);
+        const compiled = this.toQuery(
+          `SELECT ${select} FROM ${from}${appendWhere(where, cursorWhere)}${orderBy}${limit}`,
+        );
+
+        if (page?.cursor) {
+          compiled.cursor = page.cursor;
+        }
+
+        return compiled;
       }
       case "findOne": {
         const where = this.compileWhere(query.predicate, query.allIgnoreCase === true);
@@ -66,6 +93,10 @@ class MysqlQueryCompiler {
     predicate: QueryPredicatePart[],
     allIgnoreCase = false,
   ): string {
+    if (predicate.length === 0) {
+      return "";
+    }
+
     const groups = groupByOr(predicate);
     const groupSql = groups.map((group) =>
       group
@@ -189,6 +220,89 @@ class MysqlQueryCompiler {
     return ` LIMIT ${query.limit}`;
   }
 
+  private compilePage(query: ParsedQueryMethod): {
+    orders: QueryOrder[];
+    selects: string[];
+    cursor?: CursorQueryMetadata;
+    limit: number;
+    offset?: number;
+  } | undefined {
+    const { pageable } = this.invocation;
+
+    if (!pageable) {
+      return undefined;
+    }
+
+    if (query.limit !== undefined) {
+      throw new Error(`Query method "${query.methodName}" cannot combine First/Top with Pageable.`);
+    }
+
+    const orders = pageOrders(query.orderBy, mysqlPrimaryKeyProperty(this.options));
+
+    if (isOffsetPageable(pageable)) {
+      return {
+        orders,
+        selects: [],
+        limit: pageable.size,
+        offset: pageable.page * pageable.size,
+      };
+    }
+
+    if (!isCursorPageable(pageable)) {
+      return undefined;
+    }
+
+    const reverse = Boolean(pageable.before);
+    const queryOrders = reverse ? reverseOrders(orders) : orders;
+    const cursorOrders = queryOrders.map((order, index) => {
+      const cursorOrder = this.relationQuery.cursorOrder(
+        order.property,
+        `__cursor_${index}`,
+      );
+
+      return {
+        property: order.property,
+        direction: order.direction,
+        ...cursorOrder,
+      };
+    });
+
+    return {
+      orders: queryOrders,
+      selects: cursorOrders.flatMap((order) => order.select ? [order.select] : []),
+      cursor: {
+        pageable,
+        orders: cursorOrders,
+        reverse,
+      },
+      limit: pageable.size + 1,
+    };
+  }
+
+  private compilePageLimit(page: { limit: number; offset?: number }): string {
+    if (page.offset === undefined) {
+      return ` LIMIT ${page.limit}`;
+    }
+
+    return ` LIMIT ${page.limit} OFFSET ${page.offset}`;
+  }
+
+  private compileCursorWhere(cursor: CursorQueryMetadata): string {
+    const token = cursor.pageable.after ?? cursor.pageable.before;
+
+    if (!token) {
+      return "";
+    }
+
+    const values = decodeCursorValues(token);
+
+    if (values.length !== cursor.orders.length) {
+      throw new Error("Invalid cursor.");
+    }
+
+    return compileCursorPredicate(cursor.orders, values, (value) => this.push(value));
+  }
+
   private selectTarget(query: ParsedQueryMethod): string {
     const target = this.relationQuery.selectTarget();
     return query.distinct === true ? `DISTINCT ${target}` : target;
@@ -266,6 +380,56 @@ class MysqlQueryCompiler {
   private toQuery(text: string): MysqlCompiledQuery {
     return { text, values: this.values };
   }
+}
+
+function appendWhere(where: string, extra: string): string {
+  if (!extra) {
+    return where;
+  }
+
+  if (!where) {
+    return ` WHERE ${extra}`;
+  }
+
+  return `${where} AND ${extra}`;
+}
+
+function pageOrders(orderBy: QueryOrder[], primaryKey: string): QueryOrder[] {
+  const orders = orderBy.length > 0
+    ? orderBy
+    : [{ property: primaryKey, direction: "asc" as const }];
+
+  return orders.some((order) => order.property === primaryKey)
+    ? orders
+    : [...orders, { property: primaryKey, direction: "asc" }];
+}
+
+function reverseOrders(orderBy: QueryOrder[]): QueryOrder[] {
+  return orderBy.map((order) => ({
+    ...order,
+    direction: order.direction === "asc" ? "desc" : "asc",
+  }));
+}
+
+function compileCursorPredicate(
+  orders: CursorQueryOrder[],
+  values: unknown[],
+  push: (value: unknown) => string,
+): string {
+  const groups = orders.map((order, index) => {
+    const equals = orders
+      .slice(0, index)
+      .map((previous, previousIndex) =>
+        `${previous.expression} = ${push(values[previousIndex])}`,
+      );
+    const operator = order.direction === "asc" ? ">" : "<";
+    return [
+      ...equals,
+      `${order.expression} ${operator} ${push(values[index])}`,
+    ].join(" AND ");
+  });
+
+  return `(${groups.map((group) => `(${group})`).join(" OR ")})`;
 }
 
 function groupByOr(predicate: QueryPredicatePart[]): QueryPredicatePart[][] {

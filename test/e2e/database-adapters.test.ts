@@ -1,4 +1,4 @@
-import { CascadeType, Column, Entity, Id, ManyToOne, ManyToMany, NPARepository, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
+import { CascadeType, Column, CursorPage, Entity, Id, ManyToOne, ManyToMany, NPARepository, Page, Pageable, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
 import { assertRepositoryContract, createProductEntity, databaseAdapters, runDatabaseFlow, startContainerOrSkip, uniqueTableName } from "./database-flow";
 import { describe, expect, test } from "@jest/globals";
 
@@ -6,6 +6,10 @@ type Row = Record<string, unknown>;
 type ProductRepository = NPARepository<Row, unknown> & {
   countByStatus(status: string): Promise<number>;
   deleteByStatus(status: string): Promise<number>;
+  findByStatusOrderByCreatedAtDesc(
+    status: string,
+    pageable: ReturnType<typeof Pageable.cursor>,
+  ): Promise<CursorPage<Row>>;
 };
 type RelationRepository = NPARepository<Row, unknown> & {
   countByMembersName(name: string): Promise<number>;
@@ -17,6 +21,10 @@ type RelationRepository = NPARepository<Row, unknown> & {
   findByTeamIn(teams: Array<{ id: unknown }>): Promise<Row[]>;
   findByTeamLabelAndName(label: string, name: string): Promise<Row[]>;
   findByTeamLabelInOrderByTeamLabelDesc(labels: string[]): Promise<Row[]>;
+  findByNameOrderByTeamLabelAsc(
+    name: string,
+    pageable: ReturnType<typeof Pageable.cursor>,
+  ): Promise<CursorPage<Row>>;
 };
 
 describe("database adapter E2E", () => {
@@ -28,9 +36,10 @@ describe("database adapter E2E", () => {
           const repository = adapter.createRepository({
             entity: createProductEntity(tableName),
             queryable,
-          });
+          }) as ProductRepository;
 
           await assertRepositoryContract(repository, { nullableStatus: true });
+          await assertPaginationContract(repository);
         }),
       240_000,
     );
@@ -105,6 +114,30 @@ describe("database adapter E2E", () => {
           expect(await members.existsByTeamLabel("design")).toEqual(true);
           expect(await members.deleteByTeamLabel("design")).toEqual(1);
           expect(await members.existsByTeamLabel("design")).toEqual(false);
+
+          await members.insert({ name: "pager", team: { id: designId } });
+          await members.insert({ name: "pager", team: { id: platformId } });
+
+          const firstPage = await members.findByNameOrderByTeamLabelAsc(
+            "pager",
+            Pageable.cursor({ size: 1 }),
+          );
+          expect(firstPage.content.map((row) => row.team_id)).toEqual([designId]);
+          expect(firstPage.content[0]).not.toHaveProperty("__cursor_0");
+          expect(firstPage.nextCursor).not.toEqual(null);
+
+          const secondPage = await members.findByNameOrderByTeamLabelAsc(
+            "pager",
+            Pageable.cursor({ after: firstPage.nextCursor as string, size: 1 }),
+          );
+          expect(secondPage.content.map((row) => row.team_id)).toEqual([platformId]);
+          expect(secondPage.previousCursor).not.toEqual(null);
+
+          const previousPage = await members.findByNameOrderByTeamLabelAsc(
+            "pager",
+            Pageable.cursor({ before: secondPage.previousCursor as string, size: 1 }),
+          );
+          expect(previousPage.content.map((row) => row.team_id)).toEqual([designId]);
         } finally {
           try {
             if (queryable) {
@@ -371,13 +404,93 @@ decorateMethod(
 );
 decorateMethod(ProductService, "renameManagedProduct", Transaction());
 
-function product(name, price, status = "draft") {
+async function assertPaginationContract(repository: ProductRepository) {
+  await repository.insert(product(
+    "page alpha",
+    10,
+    "active",
+    new Date("2026-01-01T00:00:00.000Z"),
+  ));
+  await repository.insert(product(
+    "page beta",
+    20,
+    "active",
+    new Date("2026-01-03T00:00:00.000Z"),
+  ));
+  await repository.insert(product(
+    "page gamma",
+    30,
+    "active",
+    new Date("2026-01-03T00:00:00.000Z"),
+  ));
+  await repository.insert(product(
+    "page delta",
+    40,
+    "active",
+    new Date("2026-01-02T00:00:00.000Z"),
+  ));
+
+  const offsetPage = await repository.findAll({
+    pageable: Pageable.offset(1, 2),
+  }) as Page<Row>;
+  expect(offsetPage.content.map((row) => row.product_name)).toEqual([
+    "page gamma",
+    "page delta",
+  ]);
+  expect(offsetPage.totalElements).toEqual(4);
+  expect(offsetPage.totalPages).toEqual(2);
+  expect(offsetPage.hasPreviousPage).toEqual(true);
+  expect(offsetPage.hasNextPage).toEqual(false);
+
+  const firstPage = await repository.findByStatusOrderByCreatedAtDesc(
+    "active",
+    Pageable.cursor({ size: 2 }),
+  );
+  expect(firstPage.content.map((row) => row.product_name)).toEqual([
+    "page beta",
+    "page gamma",
+  ]);
+  expect(firstPage.hasNextPage).toEqual(true);
+  expect(firstPage.hasPreviousPage).toEqual(false);
+  expect(firstPage.nextCursor).not.toEqual(null);
+
+  const secondPage = await repository.findByStatusOrderByCreatedAtDesc(
+    "active",
+    Pageable.cursor({ after: firstPage.nextCursor as string, size: 2 }),
+  );
+  expect(secondPage.content.map((row) => row.product_name)).toEqual([
+    "page delta",
+    "page alpha",
+  ]);
+  expect(secondPage.hasNextPage).toEqual(false);
+  expect(secondPage.hasPreviousPage).toEqual(true);
+  expect(secondPage.previousCursor).not.toEqual(null);
+
+  const previousPage = await repository.findByStatusOrderByCreatedAtDesc(
+    "active",
+    Pageable.cursor({ before: secondPage.previousCursor as string, size: 2 }),
+  );
+  expect(previousPage.content.map((row) => row.product_name)).toEqual([
+    "page beta",
+    "page gamma",
+  ]);
+
+  await repository.deleteAll();
+  expect(await repository.count()).toEqual(0);
+}
+
+function product(
+  name,
+  price,
+  status = "draft",
+  createdAt = new Date("2026-01-01T00:00:00.000Z"),
+) {
   return {
     name,
     price,
     active: true,
     status,
-    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    createdAt,
   };
 }
 

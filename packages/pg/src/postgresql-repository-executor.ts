@@ -1,22 +1,31 @@
 import {
   defaultJoinTableName,
+  createCursorWindow,
+  createPage,
   EntityMetadata,
   getCurrentPersistenceContext,
   getEntityMetadata,
   getOptionalEntityMetadata,
   type EntityTarget,
+  isCursorPageable,
+  isOffsetPageable,
   joinTableColumnName,
   needsOrmDelete,
+  NPAFindOptions,
   NPAEntityGraphMetadata,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
   NPALoadOptions,
+  Page,
+  CursorPage,
   PersistenceContext,
   RelationKind,
   RelationMetadata,
   removeCascadeRelationTree,
   RepositoryMethodExecutor,
+  RepositoryMethodInvocation,
   RepositoryRawQueryExecutor,
+  stripCursorKeys,
   withUpdatedAtTimestamp,
 } from "@node-persistence-api/core";
 import {
@@ -56,6 +65,17 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   ) => {
     if (invocation.query.action === "delete" && this.shouldUseOrmDelete()) {
       return this.executeOrmDerivedDelete(invocation);
+    }
+
+    if (invocation.pageable && invocation.query.action !== "find") {
+      throw new Error(`Query method "${invocation.query.methodName}" only supports Pageable on find queries.`);
+    }
+
+    if (invocation.pageable) {
+      return this.executePageQuery(
+        invocation,
+        toEntityGraphLoad(invocation.entityGraph),
+      );
     }
 
     const query = compilePostgresqlQuery(invocation, this.options);
@@ -134,7 +154,26 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return this.manage(this.attachLazy(loaded)[0] ?? null);
   };
 
-  findAll = async (load?: NPALoadOptions<TEntity>): Promise<TEntity[]> => {
+  findAll = async (
+    load?: NPAFindOptions<TEntity>,
+  ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>> => {
+    if (load?.pageable) {
+      return this.executePageQuery(
+        {
+          query: {
+            methodName: "findAll",
+            action: "find",
+            predicate: [],
+            orderBy: [],
+            parameterCount: 0,
+          },
+          args: [],
+          pageable: load.pageable,
+        },
+        load,
+      );
+    }
+
     const query = compilePostgresqlFindAll(this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
@@ -291,7 +330,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
   deleteAll = async (): Promise<number> => {
     if (this.shouldUseOrmDelete()) {
-      return this.removeLoadedEntities(await this.findAll(this.removeCascadeLoad()));
+      return this.removeLoadedEntities(
+        await this.findAll(this.removeCascadeLoad()) as TEntity[],
+      );
     }
 
     const query = compilePostgresqlDeleteAll(this.options);
@@ -300,6 +341,59 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     return result.rowCount ?? 0;
   };
+
+  private async executePageQuery(
+    invocation: RepositoryMethodInvocation,
+    load: NPALoadOptions<TEntity> | undefined,
+  ): Promise<Page<TEntity> | CursorPage<TEntity>> {
+    const pageable = invocation.pageable;
+
+    if (!pageable) {
+      throw new Error("Page query requires Pageable.");
+    }
+
+    const query = compilePostgresqlQuery(invocation, this.options);
+    const result = await this.options.queryable.query<TEntity>(
+      query.text,
+      query.values,
+    );
+
+    if (isOffsetPageable(pageable)) {
+      const rows = await this.loadRelations(result.rows, load);
+      const countQuery = compilePostgresqlQuery(
+        {
+          query: {
+            ...invocation.query,
+            action: "count",
+            limit: undefined,
+            orderBy: [],
+          },
+          args: invocation.args,
+        },
+        this.options,
+      );
+      const countResult = await this.options.queryable.query(countQuery.text, countQuery.values);
+
+      return createPage(
+        this.manageMany(this.attachLazy(rows)),
+        pageable,
+        Number(countResult.rows[0]?.count ?? 0),
+      );
+    }
+
+    if (!isCursorPageable(pageable) || !query.cursor) {
+      throw new Error("Cursor page query requires cursor metadata.");
+    }
+
+    const window = createCursorWindow(result.rows, query.cursor);
+    const rows = stripCursorKeys(window.content, query.cursor);
+    const loaded = await this.loadRelations(rows, load);
+
+    return {
+      ...window,
+      content: this.manageMany(this.attachLazy(loaded)),
+    };
+  }
 
   private formatRawQueryResult(
     query: { result: string; managed: boolean },

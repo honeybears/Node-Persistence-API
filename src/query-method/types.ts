@@ -1,3 +1,5 @@
+import type { PageRequest } from "../repository/pagination";
+
 export type QueryMethodAction =
   | "find"
   | "findOne"
@@ -55,5 +57,5 @@ export interface ParsedQueryMethod {
 }
 
 export interface QueryMethodExecutor<TResult = unknown> {
-  (query: ParsedQueryMethod, args: unknown[]): TResult;
+  (query: ParsedQueryMethod, args: unknown[], pageable?: PageRequest): TResult;
 }

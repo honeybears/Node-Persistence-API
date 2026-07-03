@@ -483,6 +483,52 @@ and throws `OptimisticLockError` when no row matches the expected version.
 `repository.persist(entity)` and `repository.remove(entity)` also use the active
 context, so inserts and deletes flush with the transaction.
 
+## Pagination
+
+`findAll` accepts `pageable` together with relation load options. Offset
+pagination returns `Page<T>` with a count query; cursor pagination returns
+`CursorPage<T>` with bidirectional keyset cursors.
+
+```ts
+import { Pageable, type CursorPage, type Page } from '@node-persistence-api/core';
+
+const page: Page<User> = await users.findAll({
+  relations: { profile: true },
+  pageable: Pageable.offset(0, 20),
+});
+
+const first: CursorPage<User> =
+  await users.findByStatusOrderByCreatedAtDesc(
+    'active',
+    Pageable.cursor({ size: 20 }),
+  );
+
+const next = await users.findByStatusOrderByCreatedAtDesc(
+  'active',
+  Pageable.cursor({ after: first.nextCursor!, size: 20 }),
+);
+```
+
+Cursor ordering uses the derived `OrderBy` clause, or the primary key ascending
+when no order is declared. NPA appends the primary key as a tie-breaker. `before`
+performs the same keyset query in the opposite direction and reverses the
+returned rows.
+
+```ts
+abstract class MemberRepository extends NPARepository<Member, number> {
+  abstract findByNameOrderByTeamLabelAsc(
+    name: string,
+    pageable: ReturnType<typeof Pageable.cursor>,
+  ): Promise<CursorPage<Member>>;
+}
+```
+
+Cursor order currently supports scalar columns and `ManyToOne` relation chains
+such as `OrderByTeamLabelAsc`. `OneToMany` and `ManyToMany` cursor order fail
+fast because the aggregation policy is not part of the v1 contract. `after` and
+`before` cannot be used together, and `Top`/`First` cannot be combined with
+`Pageable`.
+
 ## Runtime Flow
 
 1. Service code calls a method on `UserRepository`.
@@ -512,6 +558,8 @@ const completions = getNPAQueryMethodCompletions({
   prefix: 'findByNa',
   entity: userSchema,
   workspace,
+  includeOrderBy: true,
+  includePageable: true,
 });
 
 const result = validateNPAQueryMethod({
@@ -547,7 +595,7 @@ The current codebase is suitable for demos, but the following items are needed
 before treating NPA as a fuller ORM:
 
 - Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
-- Query API: add pagination, runtime sort, projection/select clauses, aggregate/groupBy support, and bulk update by condition.
+- Query API: add runtime sort, projection/select clauses, aggregate/groupBy support, and bulk update by condition.
 - Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
 - Relations: support eager fetch strategies and safer relation mutation helpers.
 - Entity mapping: add composite keys, enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.

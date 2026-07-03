@@ -2,6 +2,7 @@ import { describe, expect, test } from "@jest/globals";
 import {
   EntityGraph,
   InMemoryRepositoryExecutor,
+  Pageable,
   Query,
   createDerivedQueryRepository,
   createNPARepository,
@@ -222,6 +223,43 @@ describe("derived query methods", () => {
     );
     expect(() => repository.findByAgeBetween(1)).toThrow(
       /expects 2 parameter\(s\), received 1/,
+    );
+  });
+
+  test("accepts Pageable as the last derived find query argument", () => {
+    const lowLevelCalls: unknown[] = [];
+    const lowLevelRepository = createQueryMethodProxy(
+      {} as DynamicRepository,
+      (query, args, pageableArg) => {
+        lowLevelCalls.push({ query, args, pageable: pageableArg });
+        return [];
+      },
+    );
+    const calls: RepositoryMethodInvocation[] = [];
+    const repository = createDerivedQueryRepository(
+      {} as DynamicRepository,
+      (invocation) => {
+        calls.push(invocation);
+        return [];
+      },
+    );
+    const pageable = Pageable.offset(0, 10);
+
+    expect(lowLevelRepository.findByName("kim", pageable)).toEqual([]);
+    expect(lowLevelCalls[0]).toMatchObject({
+      args: ["kim"],
+      pageable,
+    });
+    expect(repository.findByName("kim", pageable)).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      args: ["kim"],
+      pageable,
+    });
+    expect(() => repository.findTop2ByName("kim", pageable)).toThrow(
+      /cannot combine First\/Top with Pageable/,
+    );
+    expect(() => repository.countByName("kim", pageable)).toThrow(
+      /only supports Pageable on find queries/,
     );
   });
 
@@ -505,5 +543,72 @@ describe("derived query methods", () => {
     expect(() => repository.findByStatus(undefined)).toThrow(
       /must not be undefined/,
     );
+  });
+
+  test("executes offset and bidirectional cursor pages in memory", () => {
+    const rows = [
+      {
+        id: 1,
+        name: "a",
+        status: "active",
+        createdAt: new Date("2026-01-03T00:00:00.000Z"),
+      },
+      {
+        id: 2,
+        name: "b",
+        status: "active",
+        createdAt: new Date("2026-01-03T00:00:00.000Z"),
+      },
+      {
+        id: 3,
+        name: "c",
+        status: "active",
+        createdAt: new Date("2026-01-02T00:00:00.000Z"),
+      },
+      {
+        id: 4,
+        name: "d",
+        status: "active",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    ];
+    const executor = new InMemoryRepositoryExecutor(rows);
+    const repository = createDerivedQueryRepository(
+      {} as DynamicRepository,
+      executor.execute,
+    );
+
+    expect(
+      repository.findByStatusOrderByCreatedAtDesc(
+        "active",
+        Pageable.offset(1, 2),
+      ),
+    ).toMatchObject({
+      content: [rows[2], rows[3]],
+      page: 1,
+      size: 2,
+      totalElements: 4,
+      totalPages: 2,
+      hasNextPage: false,
+      hasPreviousPage: true,
+    });
+
+    const firstPage = repository.findByStatusOrderByCreatedAtDesc(
+      "active",
+      Pageable.cursor({ size: 2 }),
+    ) as { content: typeof rows; nextCursor: string; previousCursor: string | null };
+    const secondPage = repository.findByStatusOrderByCreatedAtDesc(
+      "active",
+      Pageable.cursor({ after: firstPage.nextCursor, size: 2 }),
+    ) as { content: typeof rows; previousCursor: string };
+    const previousPage = repository.findByStatusOrderByCreatedAtDesc(
+      "active",
+      Pageable.cursor({ before: secondPage.previousCursor, size: 2 }),
+    ) as { content: typeof rows };
+
+    expect(firstPage.content).toEqual([rows[0], rows[1]]);
+    expect(firstPage.previousCursor).toEqual(null);
+    expect(secondPage.content).toEqual([rows[2], rows[3]]);
+    expect(previousPage.content).toEqual([rows[0], rows[1]]);
   });
 });

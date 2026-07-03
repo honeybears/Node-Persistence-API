@@ -30,7 +30,14 @@ export function propertyToColumn(
   property: string,
   options: PostgresqlQueryCompilerOptions,
 ): string {
-  return quoteIdentifier(resolveColumnName(property, options));
+  return quoteIdentifier(propertyToColumnName(property, options));
+}
+
+export function propertyToColumnName(
+  property: string,
+  options: PostgresqlQueryCompilerOptions,
+): string {
+  return resolveColumnName(property, options);
 }
 
 export function primaryKeyProperty(

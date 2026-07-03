@@ -3,6 +3,7 @@ export * from "./create-npa";
 export * from "./create-npa-repository";
 export * from "./entity-graph-decorator";
 export * from "./in-memory-repository-executor";
+export * from "./pagination";
 export * from "./query-decorator";
 export * from "./repository-decorator";
 export * from "./types";

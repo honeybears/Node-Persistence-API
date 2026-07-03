@@ -12,6 +12,7 @@ import { ParsedQueryMethod } from "@node-persistence-api/core";
 import {
   primaryKeyProperty,
   propertyToColumn,
+  propertyToColumnName,
   quoteIdentifier,
   quoteQualifiedIdentifier,
   quoteTable,
@@ -47,7 +48,7 @@ export class PostgresqlRelationQueryBuilder {
   private readonly joins = new Map<string, RelationJoin>();
   private nextAlias = 1;
 
-  readonly baseAlias = quoteIdentifier("npa_0");
+  readonly baseAlias = quoteIdentifier("t0");
 
   constructor(private readonly options: PostgresqlQueryCompilerOptions) {}
 
@@ -111,6 +112,32 @@ export class PostgresqlRelationQueryBuilder {
 
     const column = propertyToColumn(property, this.options);
     return this.hasJoins() ? `${this.baseAlias}.${column}` : column;
+  }
+
+  cursorOrder(
+    property: string,
+    resultKey: string,
+  ): { expression: string; resultKey: string; hidden?: boolean; select?: string } {
+    const relationPath = this.resolveRelationFieldPath(property);
+
+    if (!relationPath) {
+      return {
+        expression: this.column(property),
+        resultKey: propertyToColumnName(property, this.options),
+      };
+    }
+
+    if (relationPath.segments.some((segment) => segment.relation.kind !== RelationKind.MANY_TO_ONE)) {
+      throw new Error("Cursor pagination only supports scalar or @ManyToOne OrderBy properties.");
+    }
+
+    const expression = this.column(property);
+    return {
+      expression,
+      resultKey,
+      hidden: true,
+      select: `${expression} AS ${quoteIdentifier(resultKey)}`,
+    };
   }
 
   private prepareProperty(property: string): void {
@@ -281,7 +308,7 @@ export class PostgresqlRelationQueryBuilder {
   }
 
   private nextQuotedAlias(): string {
-    const alias = quoteIdentifier(`npa_${this.nextAlias}`);
+    const alias = quoteIdentifier(`t${this.nextAlias}`);
     this.nextAlias += 1;
     return alias;
   }

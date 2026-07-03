@@ -12,6 +12,7 @@ import { ParsedQueryMethod } from "@node-persistence-api/core";
 import {
   mysqlPrimaryKeyProperty,
   mysqlPropertyToColumn,
+  mysqlPropertyToColumnName,
   quoteMysqlIdentifier,
   quoteMysqlQualifiedIdentifier,
   quoteMysqlTable,
@@ -45,7 +46,7 @@ export class MysqlRelationQueryBuilder {
   private readonly joins = new Map<string, RelationJoin>();
   private nextAlias = 1;
 
-  readonly baseAlias = quoteMysqlIdentifier("npa_0");
+  readonly baseAlias = quoteMysqlIdentifier("t0");
 
   constructor(private readonly options: MysqlQueryCompilerOptions) {}
 
@@ -100,6 +101,32 @@ export class MysqlRelationQueryBuilder {
 
     const column = mysqlPropertyToColumn(property, this.options);
     return this.hasJoins() ? `${this.baseAlias}.${column}` : column;
+  }
+
+  cursorOrder(
+    property: string,
+    resultKey: string,
+  ): { expression: string; resultKey: string; hidden?: boolean; select?: string } {
+    const relationPath = this.resolveRelationFieldPath(property);
+
+    if (!relationPath) {
+      return {
+        expression: this.column(property),
+        resultKey: mysqlPropertyToColumnName(property, this.options),
+      };
+    }
+
+    if (relationPath.segments.some((segment) => segment.relation.kind !== RelationKind.MANY_TO_ONE)) {
+      throw new Error("Cursor pagination only supports scalar or @ManyToOne OrderBy properties.");
+    }
+
+    const expression = this.column(property);
+    return {
+      expression,
+      resultKey,
+      hidden: true,
+      select: `${expression} AS ${quoteMysqlIdentifier(resultKey)}`,
+    };
   }
 
   private prepareProperty(property: string): void {
@@ -260,7 +287,7 @@ export class MysqlRelationQueryBuilder {
   }
 
   private nextQuotedAlias(): string {
-    const alias = quoteMysqlIdentifier(`npa_${this.nextAlias}`);
+    const alias = quoteMysqlIdentifier(`t${this.nextAlias}`);
     this.nextAlias += 1;
     return alias;
   }

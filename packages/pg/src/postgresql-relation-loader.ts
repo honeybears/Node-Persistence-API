@@ -243,14 +243,14 @@ async function loadManyToMany<TEntity extends object>(
   const placeholders = sourceIds.map((_, index) => `$${index + 1}`).join(", ");
   const result = await queryable.query<Record<string, unknown>>(
     [
-      `SELECT j.${quoteIdentifier(join.currentColumn)} AS "__npa_source_id", t.*`,
+      `SELECT j.${quoteIdentifier(join.currentColumn)} AS "__source_id", t.*`,
       `FROM ${join.table} j`,
       `JOIN ${qualifiedTable(targetMetadata)} t ON t.${quoteIdentifier(targetPrimary.columnName)} = j.${quoteIdentifier(join.relatedColumn)}`,
       `WHERE j.${quoteIdentifier(join.currentColumn)} IN (${placeholders})`,
     ].join("\n"),
     sourceIds,
   );
-  const rowsBySourceId = groupRows(result.rows, "__npa_source_id", {
+  const rowsBySourceId = groupRows(result.rows, "__source_id", {
     omitGroupColumn: true,
   });
 

@@ -3,12 +3,20 @@ import {
   QueryOrder,
   QueryPredicatePart,
 } from "../query-method";
+import {
+  createCursorWindow,
+  createPage,
+  decodeCursorValues,
+  isCursorPageable,
+  isOffsetPageable,
+  type CursorQueryMetadata,
+} from "./pagination";
 import { RepositoryMethodInvocation } from "./types";
 
 export class InMemoryRepositoryExecutor<TEntity extends object> {
   constructor(private readonly rows: TEntity[]) {}
 
-  execute = ({ query, args }: RepositoryMethodInvocation): unknown => {
+  execute = ({ query, args, pageable }: RepositoryMethodInvocation): unknown => {
     const matchedRows = this.rows.filter((row) =>
       matchesPredicate(row, query.predicate, args, query.allIgnoreCase === true),
     );
@@ -18,13 +26,24 @@ export class InMemoryRepositoryExecutor<TEntity extends object> {
       return this.deleteRows(matchedRows);
     }
 
-    const selectedRows = applyLimit(
-      sortRows(resultRows, query.orderBy),
-      query.limit,
-    );
+    const sortedRows = sortRows(resultRows, query.orderBy);
+    const selectedRows = pageable
+      ? applyPageable(sortedRows, query.orderBy, pageable)
+      : applyLimit(sortedRows, query.limit);
 
     switch (query.action) {
       case "find":
+        if (pageable && isOffsetPageable(pageable)) {
+          return createPage(selectedRows, pageable, resultRows.length);
+        }
+
+        if (pageable && isCursorPageable(pageable)) {
+          return createCursorWindow(
+            selectedRows,
+            cursorMetadata(query.orderBy, pageable),
+          );
+        }
+
         return selectedRows;
       case "findOne":
         return selectedRows[0] ?? null;
@@ -231,6 +250,85 @@ function applyLimit<TEntity>(rows: TEntity[], limit: number | undefined) {
   return limit === undefined ? rows : rows.slice(0, limit);
 }
 
+function applyPageable<TEntity extends object>(
+  rows: TEntity[],
+  orderBy: QueryOrder[],
+  pageable: NonNullable<RepositoryMethodInvocation["pageable"]>,
+): TEntity[] {
+  const orders = pageOrders(orderBy);
+  const sortedRows = sortRows(rows, orders);
+
+  if (isOffsetPageable(pageable)) {
+    const offset = pageable.page * pageable.size;
+    return sortedRows.slice(offset, offset + pageable.size);
+  }
+
+  const cursor = pageable.after ?? pageable.before;
+  const reverse = Boolean(pageable.before);
+  const effectiveOrders = reverse ? reverseOrders(orders) : orders;
+  const effectiveRows = reverse ? sortRows(rows, effectiveOrders) : sortedRows;
+  const filteredRows = cursor
+    ? effectiveRows.filter((row) =>
+      isAfterCursor(row, effectiveOrders, decodeCursorValues(cursor)),
+    )
+    : effectiveRows;
+
+  return filteredRows.slice(0, pageable.size + 1);
+}
+
+function cursorMetadata(
+  orderBy: QueryOrder[],
+  pageable: NonNullable<RepositoryMethodInvocation["pageable"]>,
+): CursorQueryMetadata {
+  if (!isCursorPageable(pageable)) {
+    throw new Error("Cursor metadata requires cursor pagination.");
+  }
+
+  return {
+    pageable,
+    orders: pageOrders(orderBy).map((order) => ({
+      ...order,
+      expression: order.property,
+      resultKey: order.property,
+    })),
+    reverse: Boolean(pageable.before),
+  };
+}
+
+function pageOrders(orderBy: QueryOrder[]): QueryOrder[] {
+  const orders = orderBy.length > 0 ? orderBy : [{ property: "id", direction: "asc" as const }];
+
+  return orders.some((order) => order.property === "id")
+    ? orders
+    : [...orders, { property: "id", direction: "asc" }];
+}
+
+function reverseOrders(orderBy: QueryOrder[]): QueryOrder[] {
+  return orderBy.map((order) => ({
+    ...order,
+    direction: order.direction === "asc" ? "desc" : "asc",
+  }));
+}
+
+function isAfterCursor<TEntity extends object>(
+  row: TEntity,
+  orderBy: QueryOrder[],
+  cursorValues: unknown[],
+): boolean {
+  for (let index = 0; index < orderBy.length; index += 1) {
+    const order = orderBy[index];
+    const result = compare(getProperty(row, order.property), cursorValues[index]);
+
+    if (result === 0) {
+      continue;
+    }
+
+    return order.direction === "asc" ? result > 0 : result < 0;
+  }
+
+  return false;
+}
+
 function distinctRows<TEntity>(rows: TEntity[]): TEntity[] {
   return [...new Set(rows)];
 }
@@ -245,6 +343,10 @@ function getProperty<TEntity extends object>(
 function compare(left: unknown, right: unknown): number {
   if (left === right) {
     return 0;
+  }
+
+  if (left instanceof Date && right instanceof Date) {
+    return Math.sign(left.getTime() - right.getTime());
   }
 
   if (left === null || left === undefined) {

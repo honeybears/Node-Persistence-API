@@ -1,5 +1,12 @@
 import { ParsedQueryMethod } from "../query-method";
 import type { NPAEntityGraphMetadata } from "./entity-graph-decorator";
+import type {
+  CursorPage,
+  OffsetPageable,
+  CursorPageable,
+  PageRequest,
+  Page,
+} from "./pagination";
 import type { NPARawQueryMetadata } from "./query-decorator";
 import type { NPARelationLoad } from "./relation-load-types";
 
@@ -8,10 +15,20 @@ export type {
   NPARelationLoad,
   NPARelationLoadTree,
 } from "./relation-load-types";
+export type {
+  CursorPage,
+  CursorQueryMetadata,
+  OffsetPageable,
+  CursorPageable,
+  PageRequest,
+  Page,
+} from "./pagination";
+export { Pageable } from "./pagination";
 
 export interface RepositoryMethodInvocation {
   query: ParsedQueryMethod;
   args: unknown[];
+  pageable?: PageRequest;
   entityGraph?: NPAEntityGraphMetadata;
 }
 
@@ -34,12 +51,23 @@ export interface NPALoadOptions<TEntity extends object = object> {
   relations?: NPARelationLoad<TEntity>;
 }
 
+export interface NPAFindOptions<TEntity extends object = object>
+  extends NPALoadOptions<TEntity> {
+  pageable?: PageRequest;
+}
+
 export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findById(
     id: TId,
     options?: NPALoadOptions<TEntity>,
   ): Promise<TEntity | null>;
-  abstract findAll(options?: NPALoadOptions<TEntity>): Promise<TEntity[]>;
+  abstract findAll(
+    options: NPAFindOptions<TEntity> & { pageable: OffsetPageable },
+  ): Promise<Page<TEntity>>;
+  abstract findAll(
+    options: NPAFindOptions<TEntity> & { pageable: CursorPageable },
+  ): Promise<CursorPage<TEntity>>;
+  abstract findAll(options?: NPAFindOptions<TEntity>): Promise<TEntity[]>;
   abstract existsById(id: TId): Promise<boolean>;
   abstract count(): Promise<number>;
   abstract persist(entity: TEntity): Promise<TEntity>;
@@ -56,8 +84,28 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract deleteAll(): Promise<number>;
 }
 
-export interface NPARepositoryAdapter<TEntity extends object, TId = unknown>
-  extends NPARepository<TEntity, TId> {
+export interface NPARepositoryAdapter<TEntity extends object, TId = unknown> {
+  findById(
+    id: TId,
+    options?: NPALoadOptions<TEntity>,
+  ): Promise<TEntity | null>;
+  findAll(
+    options?: NPAFindOptions<TEntity>,
+  ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>>;
+  existsById(id: TId): Promise<boolean>;
+  count(): Promise<number>;
+  persist(entity: TEntity): Promise<TEntity>;
+  save(entity: TEntity): Promise<TEntity | null>;
+  insert(entity: TEntity): Promise<TEntity>;
+  update(entity: TEntity): Promise<TEntity | null>;
+  updateById(
+    id: TId,
+    patch: Partial<TEntity>,
+  ): Promise<TEntity | null>;
+  remove(entity: TEntity): Promise<void>;
+  delete(entityOrId: TEntity | TId): Promise<number>;
+  deleteById(id: TId): Promise<number>;
+  deleteAll(): Promise<number>;
   executeDerivedQuery(invocation: RepositoryMethodInvocation): Promise<unknown>;
   executeRawQuery?(invocation: RepositoryRawQueryInvocation): Promise<unknown>;
 }

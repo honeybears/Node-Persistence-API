@@ -116,6 +116,7 @@ async function provideCompletionItems(document, position) {
     entity,
     workspace,
     includeOrderBy: true,
+    includePageable: true,
     limit: 80,
   }).map((completion) => toCompletionItem(completion, replacementRange));
 }

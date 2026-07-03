@@ -30,7 +30,14 @@ export function mysqlPropertyToColumn(
   property: string,
   options: MysqlQueryCompilerOptions,
 ): string {
-  return quoteIdentifier(resolveColumnName(property, options));
+  return quoteIdentifier(mysqlPropertyToColumnName(property, options));
+}
+
+export function mysqlPropertyToColumnName(
+  property: string,
+  options: MysqlQueryCompilerOptions,
+): string {
+  return resolveColumnName(property, options);
 }
 
 export function mysqlPrimaryKeyProperty(

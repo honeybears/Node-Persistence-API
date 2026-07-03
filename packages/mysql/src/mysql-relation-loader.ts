@@ -242,14 +242,14 @@ async function loadManyToMany<TEntity extends object>(
   const result = await executeMysqlQuery<Record<string, unknown>>(
     options,
     [
-      `SELECT j.${quoteIdentifier(join.currentColumn)} AS \`__npa_source_id\`, t.*`,
+      `SELECT j.${quoteIdentifier(join.currentColumn)} AS \`__source_id\`, t.*`,
       `FROM ${join.table} j`,
       `JOIN ${qualifiedTable(targetMetadata)} t ON t.${quoteIdentifier(targetPrimary.columnName)} = j.${quoteIdentifier(join.relatedColumn)}`,
       `WHERE j.${quoteIdentifier(join.currentColumn)} IN (${placeholders})`,
     ].join("\n"),
     sourceIds,
   );
-  const rowsBySourceId = groupRows(result.rows, "__npa_source_id", {
+  const rowsBySourceId = groupRows(result.rows, "__source_id", {
     omitGroupColumn: true,
   });
 

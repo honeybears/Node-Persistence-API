@@ -4,6 +4,7 @@ import {
 } from "../query-method";
 import { getEntityGraphMetadata } from "./entity-graph-decorator";
 import { getRawQueryMetadata } from "./query-decorator";
+import { isPageable } from "./pagination";
 import {
   RepositoryMethodInvocation,
   RepositoryMethodExecutor,
@@ -54,21 +55,51 @@ export function createDerivedQueryRepository<TRepository extends object>(
       return (...args: unknown[]) => {
         const query = parseQueryMethod(property);
         assertNoDuplicateQueryPredicates(query);
+        const { queryArgs, pageable } = splitQueryArgs(property, query, args);
 
-        if (args.length !== query.parameterCount) {
-          throw new Error(
-            `Query method "${property}" expects ${query.parameterCount} parameter(s), received ${args.length}.`,
-          );
-        }
-
-        const invocation: RepositoryMethodInvocation = { query, args };
+        const invocation: RepositoryMethodInvocation = { query, args: queryArgs };
 
         if (entityGraph) {
           invocation.entityGraph = entityGraph;
+        }
+
+        if (pageable) {
+          invocation.pageable = pageable;
         }
 
         return executor(invocation);
       };
     },
   });
+}
+
+function splitQueryArgs(
+  methodName: string,
+  query: { action: string; limit?: number; parameterCount: number },
+  args: unknown[],
+) {
+  const last = args[args.length - 1];
+  const pageable = args.length === query.parameterCount + 1 && isPageable(last)
+    ? last
+    : undefined;
+
+  if (pageable) {
+    if (query.action !== "find") {
+      throw new Error(`Query method "${methodName}" only supports Pageable on find queries.`);
+    }
+
+    if (query.limit !== undefined) {
+      throw new Error(`Query method "${methodName}" cannot combine First/Top with Pageable.`);
+    }
+  }
+
+  const queryArgs = pageable ? args.slice(0, -1) : args;
+
+  if (queryArgs.length !== query.parameterCount) {
+    throw new Error(
+      `Query method "${methodName}" expects ${query.parameterCount} parameter(s), received ${args.length}.`,
+    );
+  }
+
+  return { queryArgs, pageable };
 }

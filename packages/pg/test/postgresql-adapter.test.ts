@@ -28,6 +28,7 @@ import {
   ManyToOne,
   NPARepository,
   OneToMany,
+  Pageable,
   Query,
   Repository,
   UpdatedAt,
@@ -226,6 +227,68 @@ describe("PostgreSQL adapter", () => {
     });
   });
 
+  test("compiles PostgreSQL offset and cursor pagination SQL", () => {
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByStatus"),
+          args: ["active"],
+          pageable: Pageable.offset(1, 2),
+        },
+        { entity: PgProduct },
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "products" WHERE ("status" = $1) ORDER BY "product_id" ASC LIMIT 2 OFFSET 2',
+      values: ["active"],
+    });
+
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByStatusOrderByCreatedAtDesc"),
+          args: ["active"],
+          pageable: Pageable.cursor({
+            after: cursorToken(["2026-01-01T00:00:00.000Z", 10]),
+            size: 2,
+          }),
+        },
+        { entity: PgProduct },
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "products" WHERE ("status" = $1) AND (("created_at" < $2) OR ("created_at" = $3 AND "product_id" > $4)) ORDER BY "created_at" DESC, "product_id" ASC LIMIT 3',
+      values: [
+        "active",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        10,
+      ],
+      cursor: expect.any(Object),
+    });
+
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByStatusOrderByCreatedAtDesc"),
+          args: ["active"],
+          pageable: Pageable.cursor({
+            before: cursorToken(["2026-01-01T00:00:00.000Z", 10]),
+            size: 2,
+          }),
+        },
+        { entity: PgProduct },
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "products" WHERE ("status" = $1) AND (("created_at" > $2) OR ("created_at" = $3 AND "product_id" < $4)) ORDER BY "created_at" ASC, "product_id" DESC LIMIT 3',
+      values: [
+        "active",
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        10,
+      ],
+      cursor: expect.any(Object),
+    });
+  });
+
   test("preserves AND precedence by grouping OR predicate parts", () => {
     const compiled = compilePostgresqlQuery(
       {
@@ -350,7 +413,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgMember },
       ),
     ).toEqual({
-      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE ("npa_1"."label" = $1 AND "npa_0"."name" = $2) ORDER BY "npa_1"."label" DESC',
+      text: 'SELECT "t0".* FROM "members" AS "t0" JOIN "teams" AS "t1" ON "t0"."team_id" = "t1"."team_id" WHERE ("t1"."label" = $1 AND "t0"."name" = $2) ORDER BY "t1"."label" DESC',
       values: ["platform", "kim"],
     });
 
@@ -365,9 +428,35 @@ describe("PostgreSQL adapter", () => {
         { entity: PgMember },
       ),
     ).toEqual({
-      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" JOIN "organizations" AS "npa_2" ON "npa_1"."organization_id" = "npa_2"."organization_id" WHERE ("npa_2"."name" = $1) ORDER BY "npa_2"."name" DESC',
+      text: 'SELECT "t0".* FROM "members" AS "t0" JOIN "teams" AS "t1" ON "t0"."team_id" = "t1"."team_id" JOIN "organizations" AS "t2" ON "t1"."organization_id" = "t2"."organization_id" WHERE ("t2"."name" = $1) ORDER BY "t2"."name" DESC',
       values: ["openai"],
     });
+
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByNameOrderByTeamLabelAsc"),
+          args: ["kim"],
+          pageable: Pageable.cursor({ size: 2 }),
+        },
+        { entity: PgMember },
+      ),
+    ).toEqual({
+      text: 'SELECT "t0".*, "t1"."label" AS "__cursor_0" FROM "members" AS "t0" JOIN "teams" AS "t1" ON "t0"."team_id" = "t1"."team_id" WHERE ("t0"."name" = $1) ORDER BY "t1"."label" ASC, "t0"."member_id" ASC LIMIT 3',
+      values: ["kim"],
+      cursor: expect.any(Object),
+    });
+
+    expect(() =>
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByNameOrderByRolesNameAsc"),
+          args: ["kim"],
+          pageable: Pageable.cursor({ size: 2 }),
+        },
+        { entity: PgMember },
+      ),
+    ).toThrow(/Cursor pagination only supports scalar or @ManyToOne OrderBy properties/);
 
     expect(
       compilePostgresqlQuery(
@@ -378,7 +467,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgTeam },
       ),
     ).toEqual({
-      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" WHERE ("npa_1"."name" = $1)',
+      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "t0" JOIN "members" AS "t1" ON "t1"."team_id" = "t0"."team_id" WHERE ("t1"."name" = $1)',
       values: ["kim"],
     });
 
@@ -391,7 +480,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgTeam },
       ),
     ).toEqual({
-      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "npa_0" JOIN "members" AS "npa_1" ON "npa_1"."team_id" = "npa_0"."team_id" JOIN "member_roles" AS "npa_3" ON "npa_3"."pg_member_member_id" = "npa_1"."member_id" JOIN "roles" AS "npa_2" ON "npa_2"."role_id" = "npa_3"."pg_role_role_id" WHERE ("npa_2"."name" = $1)',
+      text: 'SELECT COUNT(*)::int AS "count" FROM "teams" AS "t0" JOIN "members" AS "t1" ON "t1"."team_id" = "t0"."team_id" JOIN "member_roles" AS "t3" ON "t3"."pg_member_member_id" = "t1"."member_id" JOIN "roles" AS "t2" ON "t2"."role_id" = "t3"."pg_role_role_id" WHERE ("t2"."name" = $1)',
       values: ["admin"],
     });
 
@@ -404,7 +493,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgMember },
       ),
     ).toEqual({
-      text: 'SELECT COUNT(DISTINCT "npa_0"."member_id")::int AS "count" FROM "members" AS "npa_0" JOIN "teams" AS "npa_1" ON "npa_0"."team_id" = "npa_1"."team_id" WHERE (LOWER("npa_1"."label") = $1)',
+      text: 'SELECT COUNT(DISTINCT "t0"."member_id")::int AS "count" FROM "members" AS "t0" JOIN "teams" AS "t1" ON "t0"."team_id" = "t1"."team_id" WHERE (LOWER("t1"."label") = $1)',
       values: ["platform"],
     });
 
@@ -417,7 +506,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgMember },
       ),
     ).toEqual({
-      text: 'SELECT "npa_0".* FROM "members" AS "npa_0" JOIN "member_roles" AS "npa_2" ON "npa_2"."pg_member_member_id" = "npa_0"."member_id" JOIN "roles" AS "npa_1" ON "npa_1"."role_id" = "npa_2"."pg_role_role_id" WHERE ("npa_1"."name" = $1)',
+      text: 'SELECT "t0".* FROM "members" AS "t0" JOIN "member_roles" AS "t2" ON "t2"."pg_member_member_id" = "t0"."member_id" JOIN "roles" AS "t1" ON "t1"."role_id" = "t2"."pg_role_role_id" WHERE ("t1"."name" = $1)',
       values: ["admin"],
     });
 
@@ -452,7 +541,7 @@ describe("PostgreSQL adapter", () => {
         { entity: PgMember },
       ),
     ).toEqual({
-      text: 'DELETE FROM "members" AS "npa_0" USING "teams" AS "npa_1" WHERE "npa_0"."team_id" = "npa_1"."team_id" AND ("npa_1"."label" = $1)',
+      text: 'DELETE FROM "members" AS "t0" USING "teams" AS "t1" WHERE "t0"."team_id" = "t1"."team_id" AND ("t1"."label" = $1)',
       values: ["platform"],
     });
   });
@@ -1249,8 +1338,8 @@ describe("PostgreSQL adapter", () => {
         if (text.includes('FROM "member_roles" j')) {
           return {
             rows: [
-              { __npa_source_id: 10, role_id: 7, name: "admin" },
-              { __npa_source_id: 10, role_id: 8, name: "writer" },
+              { __source_id: 10, role_id: 7, name: "admin" },
+              { __source_id: 10, role_id: 8, name: "writer" },
             ],
             rowCount: 2,
           };
@@ -1354,8 +1443,8 @@ describe("PostgreSQL adapter", () => {
         if (text.includes('FROM "member_roles" j')) {
           return {
             rows: [
-              { __npa_source_id: 10, role_id: 7, name: "admin" },
-              { __npa_source_id: 10, role_id: 8, name: "writer" },
+              { __source_id: 10, role_id: 7, name: "admin" },
+              { __source_id: 10, role_id: 8, name: "writer" },
             ],
             rowCount: 2,
           };
@@ -1461,3 +1550,11 @@ describe("PostgreSQL adapter", () => {
     expect(calls).toEqual([{ text: "SELECT $1", values: [1] }]);
   });
 });
+
+function cursorToken(values: unknown[]): string {
+  return Buffer.from(JSON.stringify({ v: 1, values }), "utf8")
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}

@@ -53,6 +53,7 @@ describe("VS Code language core", () => {
       interface UserRepository extends NPARepository<User, number> {
         findByName(name: string): Promise<User[]>;
         existsByMissing(value: string): Promise<boolean>;
+        findByActive: (active: boolean, pageable?: PageRequest) => Promise<Page<User>>;
       }
     `;
     const methods = findRepositoryMethodDeclarations(source);
@@ -74,6 +75,12 @@ describe("VS Code language core", () => {
           entityName: "User",
           methodName: "existsByMissing",
           text: "existsByMissing",
+        },
+        {
+          repositoryName: "UserRepository",
+          entityName: "User",
+          methodName: "findByActive",
+          text: "findByActive",
         },
       ]);
   });

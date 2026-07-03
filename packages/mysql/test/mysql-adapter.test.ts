@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToMany, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -205,6 +205,65 @@ describe("MySQL adapter", () => {
       });
   });
 
+  test("compiles MySQL offset and cursor pagination SQL", () => {
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByStatus"),
+          args: ["active"],
+          pageable: Pageable.offset(1, 2),
+        },
+        { entity: Product },
+      )).toEqual({
+        text:
+          "SELECT * FROM `shop`.`products` WHERE (`status` = ?) ORDER BY `product_id` ASC LIMIT 2 OFFSET 2",
+        values: ["active"],
+      });
+
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByStatusOrderByCreatedAtDesc"),
+          args: ["active"],
+          pageable: Pageable.cursor({
+            after: cursorToken(["2026-01-01T00:00:00.000Z", 10]),
+            size: 2,
+          }),
+        },
+        { entity: Product },
+      )).toEqual({
+        text:
+          "SELECT * FROM `shop`.`products` WHERE (`status` = ?) AND ((`created_at` < ?) OR (`created_at` = ? AND `product_id` > ?)) ORDER BY `created_at` DESC, `product_id` ASC LIMIT 3",
+        values: [
+          "active",
+          "2026-01-01T00:00:00.000Z",
+          "2026-01-01T00:00:00.000Z",
+          10,
+        ],
+        cursor: expect.any(Object),
+      });
+
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByStatusOrderByCreatedAtDesc"),
+          args: ["active"],
+          pageable: Pageable.cursor({
+            before: cursorToken(["2026-01-01T00:00:00.000Z", 10]),
+            size: 2,
+          }),
+        },
+        { entity: Product },
+      )).toEqual({
+        text:
+          "SELECT * FROM `shop`.`products` WHERE (`status` = ?) AND ((`created_at` > ?) OR (`created_at` = ? AND `product_id` < ?)) ORDER BY `created_at` ASC, `product_id` DESC LIMIT 3",
+        values: [
+          "active",
+          "2026-01-01T00:00:00.000Z",
+          "2026-01-01T00:00:00.000Z",
+          10,
+        ],
+        cursor: expect.any(Object),
+      });
+  });
+
   test("compiles MySQL null and empty-list derived query parameters", () => {
     expect(compileMysqlQuery(
         {
@@ -298,7 +357,7 @@ describe("MySQL adapter", () => {
         { entity: Member },
       )).toEqual({
         text:
-          "SELECT `npa_0`.* FROM `members` AS `npa_0` JOIN `teams` AS `npa_1` ON `npa_0`.`team_id` = `npa_1`.`team_id` WHERE (`npa_1`.`label` = ? AND `npa_0`.`name` = ?) ORDER BY `npa_1`.`label` DESC",
+          "SELECT `t0`.* FROM `members` AS `t0` JOIN `teams` AS `t1` ON `t0`.`team_id` = `t1`.`team_id` WHERE (`t1`.`label` = ? AND `t0`.`name` = ?) ORDER BY `t1`.`label` DESC",
         values: ["platform", "kim"],
       });
 
@@ -310,9 +369,33 @@ describe("MySQL adapter", () => {
         { entity: Member },
       )).toEqual({
         text:
-          "SELECT `npa_0`.* FROM `members` AS `npa_0` JOIN `teams` AS `npa_1` ON `npa_0`.`team_id` = `npa_1`.`team_id` JOIN `organizations` AS `npa_2` ON `npa_1`.`organization_id` = `npa_2`.`organization_id` WHERE (`npa_2`.`name` = ?) ORDER BY `npa_2`.`name` DESC",
+          "SELECT `t0`.* FROM `members` AS `t0` JOIN `teams` AS `t1` ON `t0`.`team_id` = `t1`.`team_id` JOIN `organizations` AS `t2` ON `t1`.`organization_id` = `t2`.`organization_id` WHERE (`t2`.`name` = ?) ORDER BY `t2`.`name` DESC",
         values: ["openai"],
       });
+
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByNameOrderByTeamLabelAsc"),
+          args: ["kim"],
+          pageable: Pageable.cursor({ size: 2 }),
+        },
+        { entity: Member },
+      )).toEqual({
+        text:
+          "SELECT `t0`.*, `t1`.`label` AS `__cursor_0` FROM `members` AS `t0` JOIN `teams` AS `t1` ON `t0`.`team_id` = `t1`.`team_id` WHERE (`t0`.`name` = ?) ORDER BY `t1`.`label` ASC, `t0`.`member_id` ASC LIMIT 3",
+        values: ["kim"],
+        cursor: expect.any(Object),
+      });
+
+    expect(() =>
+        compileMysqlQuery(
+          {
+            query: parseQueryMethod("findByNameOrderByRolesNameAsc"),
+            args: ["kim"],
+            pageable: Pageable.cursor({ size: 2 }),
+          },
+          { entity: Member },
+        )).toThrow(/Cursor pagination only supports scalar or @ManyToOne OrderBy properties/);
 
     expect(compileMysqlQuery(
         {
@@ -322,7 +405,7 @@ describe("MySQL adapter", () => {
         { entity: Team },
       )).toEqual({
         text:
-          "SELECT COUNT(*) AS `count` FROM `teams` AS `npa_0` JOIN `members` AS `npa_1` ON `npa_1`.`team_id` = `npa_0`.`team_id` WHERE (`npa_1`.`name` = ?)",
+          "SELECT COUNT(*) AS `count` FROM `teams` AS `t0` JOIN `members` AS `t1` ON `t1`.`team_id` = `t0`.`team_id` WHERE (`t1`.`name` = ?)",
         values: ["kim"],
       });
 
@@ -334,7 +417,7 @@ describe("MySQL adapter", () => {
         { entity: Team },
       )).toEqual({
         text:
-          "SELECT COUNT(*) AS `count` FROM `teams` AS `npa_0` JOIN `members` AS `npa_1` ON `npa_1`.`team_id` = `npa_0`.`team_id` JOIN `member_roles` AS `npa_3` ON `npa_3`.`member_id` = `npa_1`.`member_id` JOIN `roles` AS `npa_2` ON `npa_2`.`role_id` = `npa_3`.`role_id` WHERE (`npa_2`.`name` = ?)",
+          "SELECT COUNT(*) AS `count` FROM `teams` AS `t0` JOIN `members` AS `t1` ON `t1`.`team_id` = `t0`.`team_id` JOIN `member_roles` AS `t3` ON `t3`.`member_id` = `t1`.`member_id` JOIN `roles` AS `t2` ON `t2`.`role_id` = `t3`.`role_id` WHERE (`t2`.`name` = ?)",
         values: ["admin"],
       });
 
@@ -346,7 +429,7 @@ describe("MySQL adapter", () => {
         { entity: Member },
       )).toEqual({
         text:
-          "SELECT COUNT(DISTINCT `npa_0`.`member_id`) AS `count` FROM `members` AS `npa_0` JOIN `teams` AS `npa_1` ON `npa_0`.`team_id` = `npa_1`.`team_id` WHERE (LOWER(`npa_1`.`label`) = ?)",
+          "SELECT COUNT(DISTINCT `t0`.`member_id`) AS `count` FROM `members` AS `t0` JOIN `teams` AS `t1` ON `t0`.`team_id` = `t1`.`team_id` WHERE (LOWER(`t1`.`label`) = ?)",
         values: ["platform"],
       });
 
@@ -358,7 +441,7 @@ describe("MySQL adapter", () => {
         { entity: Member },
       )).toEqual({
         text:
-          "SELECT `npa_0`.* FROM `members` AS `npa_0` JOIN `member_roles` AS `npa_2` ON `npa_2`.`member_id` = `npa_0`.`member_id` JOIN `roles` AS `npa_1` ON `npa_1`.`role_id` = `npa_2`.`role_id` WHERE (`npa_1`.`name` = ?)",
+          "SELECT `t0`.* FROM `members` AS `t0` JOIN `member_roles` AS `t2` ON `t2`.`member_id` = `t0`.`member_id` JOIN `roles` AS `t1` ON `t1`.`role_id` = `t2`.`role_id` WHERE (`t1`.`name` = ?)",
         values: ["admin"],
       });
 
@@ -388,7 +471,7 @@ describe("MySQL adapter", () => {
         { entity: Member },
       )).toEqual({
         text:
-          "DELETE `npa_0` FROM `members` AS `npa_0` JOIN `teams` AS `npa_1` ON `npa_0`.`team_id` = `npa_1`.`team_id` WHERE (`npa_1`.`label` = ?)",
+          "DELETE `t0` FROM `members` AS `t0` JOIN `teams` AS `t1` ON `t0`.`team_id` = `t1`.`team_id` WHERE (`t1`.`label` = ?)",
         values: ["platform"],
       });
   });
@@ -1114,8 +1197,8 @@ describe("MySQL adapter", () => {
 
         if (text.includes("FROM `member_roles` j")) {
           return [[
-            { __npa_source_id: 10, role_id: 7, name: "admin" },
-            { __npa_source_id: 10, role_id: 8, name: "writer" },
+            { __source_id: 10, role_id: 7, name: "admin" },
+            { __source_id: 10, role_id: 8, name: "writer" },
           ], []];
         }
 
@@ -1201,8 +1284,8 @@ describe("MySQL adapter", () => {
 
         if (text.includes("FROM `member_roles` j")) {
           return [[
-            { __npa_source_id: 10, role_id: 7, name: "admin" },
-            { __npa_source_id: 10, role_id: 8, name: "writer" },
+            { __source_id: 10, role_id: 7, name: "admin" },
+            { __source_id: 10, role_id: 8, name: "writer" },
           ], []];
         }
 
@@ -1313,3 +1396,11 @@ describe("MySQL adapter", () => {
     ]);
   });
 });
+
+function cursorToken(values: unknown[]): string {
+  return Buffer.from(JSON.stringify({ v: 1, values }), "utf8")
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}

@@ -100,6 +100,7 @@ export function getNPAQueryMethodCompletions(
               entity: options.entity,
               name,
               workspace: options.workspace,
+              includePageable: options.includePageable,
               operator,
               predicateSuffixRank: predicateSuffix.rank,
               property,
@@ -113,6 +114,7 @@ export function getNPAQueryMethodCompletions(
                   entity: options.entity,
                   name,
                   workspace: options.workspace,
+                  includePageable: options.includePageable,
                   operator,
                   orderProperties,
                   predicateSuffixRank: predicateSuffix.rank,
@@ -140,6 +142,7 @@ export function getNPAQueryMethodCompletions(
             entity: options.entity,
             name,
             operator,
+            includePageable: options.includePageable,
             predicateSuffixRank: predicateSuffix.rank,
             property,
             workspace: options.workspace,
@@ -153,6 +156,7 @@ export function getNPAQueryMethodCompletions(
                 entity: options.entity,
                 name,
                 operator,
+                includePageable: options.includePageable,
                 orderProperties,
                 predicateSuffixRank: predicateSuffix.rank,
                 property,
@@ -314,6 +318,7 @@ function getOrderByCompletions(options: {
   action: QueryMethodAction;
   actionRank: number;
   entity: NPALanguageEntitySchema;
+  includePageable?: boolean;
   name: string;
   operator: CompletionOperator;
   workspace?: GetNPAQueryMethodCompletionsOptions["workspace"];
@@ -469,6 +474,7 @@ function toCompletion(options: {
   action: QueryMethodAction;
   actionRank: number;
   entity: NPALanguageEntitySchema;
+  includePageable?: boolean;
   name: string;
   operator: CompletionOperator;
   orderRank?: number;
@@ -476,12 +482,18 @@ function toCompletion(options: {
   property: QueryableCompletionProperty;
   workspace?: GetNPAQueryMethodCompletionsOptions["workspace"];
 }): NPAQueryMethodCompletion {
-  const parameters = getMethodParameters(options.name, options.entity, options.workspace) ??
+  const queryParameters = getMethodParameters(options.name, options.entity, options.workspace) ??
     getParameters(options.property, options.operator);
-  const returnType = getReturnType(options.action, options.entity.className);
-  const parameterText = parameters.map((parameter) => `${parameter.name}: ${parameter.type}`).join(", ");
+  const hasPageable = options.includePageable && canUsePageable(options.action, options.name);
+  const parameters = hasPageable
+    ? [...queryParameters, { name: "pageable", type: "PageRequest", optional: true }]
+    : queryParameters;
+  const returnType = hasPageable
+    ? getPageableReturnType(options.entity.className)
+    : getReturnType(options.action, options.entity.className);
+  const parameterText = parameters.map(formatParameter).join(", ");
   const snippetParameterText = parameters
-    .map((parameter, index) => `\${${index + 1}:${parameter.name}}: ${parameter.type}`)
+    .map((parameter, index) => `\${${index + 1}:${parameter.name}}${parameter.optional ? "?" : ""}: ${parameter.type}`)
     .join(", ");
   const signature = `${options.name}(${parameterText}): ${returnType};`;
   const detail = `${returnType} - ${options.property.label} ${options.operator.operator}`;
@@ -619,6 +631,18 @@ function getReturnType(action: QueryMethodAction, entityName: string): string {
   }
 
   return `Promise<${entityName}[]>`;
+}
+
+function getPageableReturnType(entityName: string): string {
+  return `Promise<${entityName}[] | Page<${entityName}> | CursorPage<${entityName}>>`;
+}
+
+function formatParameter(parameter: NPAQueryMethodCompletionParameter): string {
+  return `${parameter.name}${parameter.optional ? "?" : ""}: ${parameter.type}`;
+}
+
+function canUsePageable(action: QueryMethodAction, methodName: string): boolean {
+  return action === "find" && !/^find(?:Distinct)?(?:First|Top)/.test(methodName);
 }
 
 function canOrder(action: QueryMethodAction): boolean {

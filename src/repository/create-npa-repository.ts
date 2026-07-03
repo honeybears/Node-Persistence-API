@@ -3,6 +3,7 @@ import { getEntityGraphMetadata } from "./entity-graph-decorator";
 import {
   NPARepository,
   NPARepositoryAdapter,
+  NPAFindOptions,
   NPALoadOptions,
   NPARelationLoadTree,
 } from "./types";
@@ -26,7 +27,7 @@ export function createNPARepository<
             options,
           ),
         ),
-      findAll: (options?: NPALoadOptions<TEntity>) =>
+      findAll: (options?: NPAFindOptions<TEntity>) =>
         adapter.findAll(
           mergeLoadOptions(
             toLoadOptions(getEntityGraphMetadata(target, "findAll")),
@@ -71,14 +72,14 @@ function toLoadOptions<TEntity extends object>(
 
 function mergeLoadOptions<TEntity extends object>(
   left: NPALoadOptions<TEntity> | undefined,
-  right: NPALoadOptions<TEntity> | undefined,
-): NPALoadOptions<TEntity> | undefined {
+  right: NPAFindOptions<TEntity> | undefined,
+): NPAFindOptions<TEntity> | undefined {
   if (!left?.relations) {
     return right;
   }
 
   if (!right?.relations) {
-    return left;
+    return { ...right, relations: left.relations };
   }
 
   const leftRelations = left.relations;
@@ -93,6 +94,7 @@ function mergeLoadOptions<TEntity extends object>(
   }
 
   return {
+    ...right,
     relations: {
       ...toRelationTree(leftRelations),
       ...toRelationTree(rightRelations),

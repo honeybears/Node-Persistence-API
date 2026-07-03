@@ -54,6 +54,7 @@ export interface NPALanguageWorkspaceSchema {
 export interface NPAQueryMethodCompletionParameter {
   name: string;
   type: string;
+  optional?: boolean;
 }
 
 export interface NPAQueryMethodCompletion {
@@ -75,6 +76,7 @@ export interface GetNPAQueryMethodCompletionsOptions {
   workspace?: NPALanguageWorkspaceSchema;
   actions?: QueryMethodAction[];
   includeOrderBy?: boolean;
+  includePageable?: boolean;
   limit?: number;
 }
 

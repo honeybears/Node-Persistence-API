@@ -1,5 +1,6 @@
 const ENTITY_FILE_PATTERN = /\.entity\.(ts|tsx)$/;
 const QUERY_METHOD_PATTERN = /\b(?:abstract\s+)?((?:findOne|find|exists|count|delete)[A-Za-z0-9_]*By[A-Za-z0-9_]*)\s*\(/g;
+const QUERY_FUNCTION_PROPERTY_PATTERN = /\b(?:(?:public|protected|private|static|readonly|override|abstract|declare)\s+)*((?:findOne|find|exists|count|delete)[A-Za-z0-9_]*By[A-Za-z0-9_]*)[!?]?\s*:\s*\(/g;
 const REPOSITORY_PATTERN = /(?:export\s+)?(?:(abstract)\s+)?(class|interface)\s+([A-Za-z_]\w*)\s+extends\s+NPARepository\s*<\s*([A-Za-z_]\w*)\s*,/g;
 const QUERY_DECORATOR_DIAGNOSTIC_CODE = "npa-query-function-property";
 
@@ -147,28 +148,35 @@ function findRepositoryMethodDeclarations(source) {
   return findRepositoryDeclarations(source).flatMap((repository) => {
     const body = source.slice(repository.bodyStart + 1, repository.bodyEnd);
     const methods = [];
-    let match;
 
-    while ((match = QUERY_METHOD_PATTERN.exec(body)) !== null) {
-      const methodName = match[1];
-      const start = repository.bodyStart + 1 + match.index + match[0].indexOf(methodName);
-
-      if (queryDecoratedMethods.some((method) =>
-        start >= method.nameStart && start < method.nameEnd,
-      )) {
-        continue;
-      }
-
-      methods.push({
-        ...repository,
-        methodName,
-        start,
-        end: start + methodName.length,
-      });
-    }
+    collectQueryMethodDeclarationMatches(body, QUERY_METHOD_PATTERN, repository, queryDecoratedMethods, methods);
+    collectQueryMethodDeclarationMatches(body, QUERY_FUNCTION_PROPERTY_PATTERN, repository, queryDecoratedMethods, methods);
 
     return methods;
   });
+}
+
+function collectQueryMethodDeclarationMatches(body, pattern, repository, queryDecoratedMethods, methods) {
+  pattern.lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(body)) !== null) {
+    const methodName = match[1];
+    const start = repository.bodyStart + 1 + match.index + match[0].indexOf(methodName);
+
+    if (queryDecoratedMethods.some((method) =>
+      start >= method.nameStart && start < method.nameEnd,
+    )) {
+      continue;
+    }
+
+    methods.push({
+      ...repository,
+      methodName,
+      start,
+      end: start + methodName.length,
+    });
+  }
 }
 
 function findQueryDecoratedRepositoryMembers(source) {
