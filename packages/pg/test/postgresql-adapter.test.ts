@@ -26,6 +26,7 @@ import {
   Loaded,
   ManyToMany,
   ManyToOne,
+  NPADatabaseError,
   NPARepository,
   OneToOne,
   OneToMany,
@@ -775,6 +776,88 @@ describe("PostgreSQL adapter", () => {
         values: ["desk"],
       },
     ]);
+  });
+
+  test("logs PostgreSQL SQL through NPA operations", async () => {
+    const events = [];
+    const slowQueries = [];
+    const queryable = {
+      async query(text, values) {
+        return {
+          rows: [{ product_id: values[0], product_name: "desk" }],
+          rowCount: 1,
+        };
+      },
+    };
+    const npa = createNPA({
+      adapter: postgresql({ queryable: asPgQueryable(queryable) }),
+      operations: {
+        logger: (event) => events.push(event),
+        onSlowQuery: (event) => slowQueries.push(event),
+        slowQueryThresholdMs: 0,
+      },
+      repositories: [PgProductRepository],
+    });
+    const products = npa.get(PgProductRepository) as PgProductRepository &
+      DynamicRepository;
+
+    await products.findById(10);
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        adapter: "postgresql",
+        text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
+        values: [10],
+        success: true,
+        rowCount: 1,
+        durationMs: expect.any(Number),
+      }),
+    ]);
+    expect(slowQueries).toEqual(events);
+  });
+
+  test("wraps PostgreSQL driver errors with SQL context", async () => {
+    const events = [];
+    const driverError = Object.assign(new Error("duplicate key"), {
+      code: "23505",
+      constraint: "products_pkey",
+      detail: "Key already exists.",
+    });
+    const queryable = {
+      async query() {
+        throw driverError;
+      },
+    };
+    const npa = createNPA({
+      adapter: postgresql({ queryable: asPgQueryable(queryable) }),
+      operations: {
+        logger: (event) => events.push(event),
+      },
+      repositories: [PgProductRepository],
+    });
+    const products = npa.get(PgProductRepository) as PgProductRepository &
+      DynamicRepository;
+
+    await expect(products.findById(10)).rejects.toMatchObject({
+      adapter: "postgresql",
+      code: "23505",
+      constraint: "products_pkey",
+      detail: "Key already exists.",
+      name: "NPADatabaseError",
+      text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
+      values: [10],
+    });
+
+    const error = await products.findById(10).catch((caught) => caught);
+    expect(error).toBeInstanceOf(NPADatabaseError);
+    expect(error.cause).toBe(driverError);
+    expect(events[0]).toEqual(expect.objectContaining({
+      adapter: "postgresql",
+      error: expect.any(NPADatabaseError),
+      success: false,
+      text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
+      values: [10],
+    }));
   });
 
   test("creates a transaction manager when PostgreSQL adapter receives a connection", async () => {

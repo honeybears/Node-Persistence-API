@@ -1,4 +1,4 @@
-import { EntityTarget, CursorQueryMetadata, NPALoadOptions } from "@node-persistence-api/core";
+import { EntityTarget, CursorQueryMetadata, NPALoadOptions, NPAOperationsOptions } from "@node-persistence-api/core";
 
 export interface PostgresqlQueryResult<TRow = Record<string, unknown>> {
   rows: TRow[];
@@ -22,6 +22,7 @@ export interface PostgresqlQueryCompilerOptions {
 
 export interface PostgresqlRepositoryOptions
   extends PostgresqlQueryCompilerOptions {
+  operations?: NPAOperationsOptions;
   queryable: PostgresqlQueryable;
 }
 

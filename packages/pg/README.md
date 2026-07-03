@@ -12,7 +12,7 @@ npm install @node-persistence-api/connector-pg
 
 ```ts
 import { Pool } from 'pg';
-import { NPA } from '@node-persistence-api/core';
+import { createNPA } from '@node-persistence-api/core';
 import {
   PostgresqlConnection,
   postgresql,
@@ -23,7 +23,7 @@ import { UserRepository } from './user.repository';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const connection = new PostgresqlConnection(pool);
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: postgresql({ queryable: connection }),
 });
 
@@ -39,10 +39,10 @@ Pass a transaction-capable connection when repository calls must share a
 database transaction:
 
 ```ts
-import { NPA, Transaction } from '@node-persistence-api/core';
+import { createNPA, Transaction } from '@node-persistence-api/core';
 import { postgresql } from '@node-persistence-api/connector-pg';
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: postgresql({ connection: pool }),
 });
 

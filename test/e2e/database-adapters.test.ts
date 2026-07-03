@@ -53,6 +53,47 @@ describe("database adapter E2E", () => {
 
   for (const adapter of databaseAdapters) {
     test(
+      `logs ${adapter.name} repository SQL against a real database`,
+      () =>
+        runDatabaseFlow(adapter, async ({ queryable, tableName }) => {
+          const events = [];
+          const slowQueries = [];
+          const repository = adapter.createRepository({
+            entity: createProductEntity(tableName),
+            operations: {
+              logger: (event) => events.push(event),
+              onSlowQuery: (event) => slowQueries.push(event),
+              slowQueryThresholdMs: 0,
+            },
+            queryable,
+          }) as ProductRepository;
+
+          const inserted = await repository.insert({
+            name: "logging desk",
+            price: 120,
+            active: true,
+            status: "draft",
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          });
+          await repository.findById(inserted.product_id);
+
+          expect(events.length).toBeGreaterThanOrEqual(2);
+          expect(events).toEqual(slowQueries);
+          expect(events[0]).toEqual(expect.objectContaining({
+            adapter: adapter.adapterName,
+            durationMs: expect.any(Number),
+            success: true,
+            values: expect.any(Array),
+          }));
+          expect(events.map((event) => event.text).join("\n")).toMatch(/INSERT/);
+          expect(events.map((event) => event.text).join("\n")).toMatch(/SELECT/);
+        }),
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
       `runs ${adapter.name} relation-field derived queries against a real database`,
       async () => {
         const teamTableName = uniqueTableName(`${adapter.tablePrefix}_teams`);

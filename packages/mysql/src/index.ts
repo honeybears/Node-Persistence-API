@@ -6,6 +6,7 @@ export * from "./mysql-query-compiler";
 export * from "./mysql-raw-query";
 export * from "./mysql-relation-loader";
 export * from "./mysql-migration";
+export * from "./mysql-operations";
 export * from "./mysql-repository-executor";
 export * from "./mysql-transaction-manager";
 export * from "./mysql-result";

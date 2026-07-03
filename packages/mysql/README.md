@@ -12,7 +12,7 @@ npm install @node-persistence-api/connector-mysql
 
 ```ts
 import mysql from 'mysql2/promise';
-import { NPA } from '@node-persistence-api/core';
+import { createNPA } from '@node-persistence-api/core';
 import {
   MysqlConnection,
   mysql as npaMysql,
@@ -23,7 +23,7 @@ import { UserRepository } from './user.repository';
 const pool = mysql.createPool(process.env.DATABASE_URL);
 const connection = new MysqlConnection(pool);
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: npaMysql({ queryable: connection }),
 });
 
@@ -39,10 +39,10 @@ Pass a transaction-capable connection when repository calls must share a
 database transaction:
 
 ```ts
-import { NPA, Transaction } from '@node-persistence-api/core';
+import { createNPA, Transaction } from '@node-persistence-api/core';
 import { mysql as npaMysql } from '@node-persistence-api/connector-mysql';
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: npaMysql({ connection: pool }),
 });
 

@@ -6,6 +6,7 @@ export * from "./postgresql-query-compiler";
 export * from "./postgresql-raw-query";
 export * from "./postgresql-relation-loader";
 export * from "./postgresql-migration";
+export * from "./postgresql-operations";
 export * from "./postgresql-repository-executor";
 export * from "./postgresql-transaction-manager";
 export * from "./types";

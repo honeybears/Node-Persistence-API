@@ -155,7 +155,7 @@ Application code extends only NPA, not a database-specific repository type.
 
 Declare repositories as abstract classes and bind them to entities with
 `@Repository`. Imported decorated repositories are auto-registered when
-`new NPA({ adapter })` runs. Pass `repositories: [UserRepository]` only when
+`createNPA({ adapter })` runs. Pass `repositories: [UserRepository]` only when
 you want to restrict an NPA instance to an explicit subset. NPA creates the
 concrete implementation at runtime with a `Proxy`, so only the methods you want
 autocomplete for need to be declared.
@@ -170,10 +170,11 @@ export { UserRepository } from './user.repository';
 export { TeamRepository } from './team.repository';
 
 // src/main.ts
+import { createNPA } from '@node-persistence-api/core';
 import './repositories';
 import { UserRepository } from './user.repository';
 
-const npa = new NPA({ adapter });
+const npa = createNPA({ adapter });
 const users = npa.get(UserRepository);
 ```
 
@@ -404,13 +405,13 @@ decorator expressions are rejected by migration parsing.
 ## Adapter Wiring
 
 Choose the adapter in composition code. PostgreSQL and MySQL both implement the
-same runtime adapter contract used by `new NPA()`.
+same runtime adapter contract used by `createNPA()`.
 
 ### PostgreSQL
 
 ```ts
 import { Pool } from 'pg';
-import { NPA } from '@node-persistence-api/core';
+import { createNPA } from '@node-persistence-api/core';
 import { PostgresqlConnection, postgresql } from '@node-persistence-api/connector-pg';
 import './repositories';
 import { UserRepository } from './user.repository';
@@ -418,7 +419,7 @@ import { UserRepository } from './user.repository';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const connection = new PostgresqlConnection(pool);
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: postgresql({ queryable: connection }),
 });
 
@@ -442,7 +443,7 @@ Wire the MySQL adapter with a `mysql2` pool or connection.
 
 ```ts
 import mysql from 'mysql2/promise';
-import { NPA } from '@node-persistence-api/core';
+import { createNPA } from '@node-persistence-api/core';
 import { MysqlConnection, mysql as npaMysql } from '@node-persistence-api/connector-mysql';
 import './repositories';
 import { UserRepository } from './user.repository';
@@ -450,7 +451,7 @@ import { UserRepository } from './user.repository';
 const pool = mysql.createPool(process.env.DATABASE_URL);
 const connection = new MysqlConnection(pool);
 
-const npa = new NPA({
+const npa = createNPA({
   adapter: npaMysql({ queryable: connection }),
 });
 
@@ -467,6 +468,46 @@ await users.deleteById(1);
 await users.deleteAll();
 await users.findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc('ki');
 ```
+
+## Operations
+
+Pass `operations` to `createNPA` to observe repository SQL across PostgreSQL and
+MySQL adapters. The logger receives the adapter name, SQL text, bound values,
+duration, success state, and basic result counts. `onSlowQuery` fires when
+`durationMs >= slowQueryThresholdMs`.
+
+```ts
+import { createNPA, NPADatabaseError } from '@node-persistence-api/core';
+import { postgresql } from '@node-persistence-api/connector-pg';
+
+const npa = createNPA({
+  adapter: postgresql({ queryable: connection }),
+  operations: {
+    logger(event) {
+      console.log(event.adapter, event.durationMs, event.text, event.values);
+    },
+    slowQueryThresholdMs: 100,
+    onSlowQuery(event) {
+      console.warn('slow query', event.durationMs, event.text);
+    },
+  },
+});
+
+try {
+  await npa.get(UserRepository).insert(user);
+} catch (error) {
+  if (error instanceof NPADatabaseError) {
+    console.error(error.adapter, error.code, error.text, error.values);
+    throw error.cause;
+  }
+
+  throw error;
+}
+```
+
+Driver failures are wrapped as `NPADatabaseError` with the original error in
+`cause`. Common fields such as `code`, `constraint`, `detail`, `errno`, and
+`sqlState` are copied when the driver exposes them.
 
 
 ## Transactions
@@ -486,7 +527,7 @@ database transaction and rejects dirty-checking flushes, `persist`, and
 import {
   TransactionIsolation,
   Transaction,
-  NPA,
+  createNPA,
 } from '@node-persistence-api/core';
 import { postgresql } from '@node-persistence-api/connector-pg';
 import { Pool } from 'pg';
@@ -494,7 +535,7 @@ import './repositories';
 import { UserRepository } from './user.repository';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const npa = new NPA({
+const npa = createNPA({
   adapter: postgresql({ connection: pool }),
 });
 
@@ -648,7 +689,7 @@ before treating NPA as a fuller ORM:
 - Entity mapping: add enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks and richer DDL for defaults/generated columns/enums.
 - Transactions: add more propagation modes.
-- Operations: add SQL logging, slow-query hooks, metrics/tracing, normalized driver errors, retry policy hooks, and clearer connection ownership docs.
+- Operations: add metrics/tracing, retry policy hooks, and clearer connection ownership docs.
 - Tooling: harden package publishing, keep examples current, and expand editor support beyond the VS Code MVP.
 
 ### E2E Database Tests

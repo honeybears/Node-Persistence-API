@@ -43,6 +43,7 @@ export function postgresql(
     ): TRepository & NPARepository<TEntity, TId> {
       const executor = new PostgresqlRepositoryExecutor<TEntity, TId>({
         entity: repositoryOptions.entity,
+        operations: repositoryOptions.operations,
         queryable,
       });
       const target = Object.create(

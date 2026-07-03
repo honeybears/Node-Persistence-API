@@ -1,4 +1,4 @@
-import { EntityTarget, CursorQueryMetadata, NPALoadOptions } from "@node-persistence-api/core";
+import { EntityTarget, CursorQueryMetadata, NPALoadOptions, NPAOperationsOptions } from "@node-persistence-api/core";
 
 export interface MysqlOkPacket {
   affectedRows?: number;
@@ -36,6 +36,7 @@ export interface MysqlQueryCompilerOptions {
 }
 
 export interface MysqlRepositoryOptions extends MysqlQueryCompilerOptions {
+  operations?: NPAOperationsOptions;
   queryable: MysqlQueryable;
   preferExecute?: boolean;
 }

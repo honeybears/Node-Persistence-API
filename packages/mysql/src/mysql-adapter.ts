@@ -49,6 +49,7 @@ export function mysql(options: MysqlAdapterOptions): NPARuntimeAdapter {
     ): TRepository & NPARepository<TEntity, TId> {
       const executor = new MysqlRepositoryExecutor<TEntity, TId>({
         entity: repositoryOptions.entity,
+        operations: repositoryOptions.operations,
         preferExecute: options.preferExecute,
         queryable,
       });

@@ -45,6 +45,7 @@ import {
 import { quoteIdentifier, quoteQualifiedIdentifier } from "./postgresql-identifiers";
 import { compilePostgresqlQuery } from "./postgresql-query-compiler";
 import { compilePostgresqlRawQuery } from "./postgresql-raw-query";
+import { instrumentPostgresqlQueryable } from "./postgresql-operations";
 import {
   attachPostgresqlLazyRelations,
   loadPostgresqlRelations,
@@ -55,8 +56,16 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
   implements NPARepositoryAdapter<TEntity, TId>
 {
   private readonly dirtyCheckAdapter: NPADirtyCheckAdapter<TEntity>;
+  private readonly options: PostgresqlRepositoryOptions;
 
-  constructor(private readonly options: PostgresqlRepositoryOptions) {
+  constructor(options: PostgresqlRepositoryOptions) {
+    this.options = {
+      ...options,
+      queryable: instrumentPostgresqlQueryable(
+        options.queryable,
+        options.operations,
+      ),
+    };
     this.dirtyCheckAdapter = this.createDirtyCheckAdapter(
       this.options.entity as EntityTarget<TEntity> | undefined,
     );
@@ -705,6 +714,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     return {
       entity,
+      operations: this.options.operations,
       queryable: this.options.queryable,
     };
   }

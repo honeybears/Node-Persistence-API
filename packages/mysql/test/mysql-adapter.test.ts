@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPARepository, OneToOne, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, Id, Loaded, ManyToMany, ManyToOne, NPADatabaseError, NPARepository, OneToOne, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -801,6 +801,86 @@ describe("MySQL adapter", () => {
         values: ["desk"],
       },
     ]);
+  });
+
+  test("logs MySQL SQL through NPA operations", async () => {
+    const events = [];
+    const slowQueries = [];
+    const queryable = {
+      async query(text, values) {
+        return [[{ product_id: values[0], product_name: "desk" }], []];
+      },
+    };
+    const npa = createNPA({
+      adapter: mysql({ queryable: asMysqlQueryable(queryable) }),
+      operations: {
+        logger: (event) => events.push(event),
+        onSlowQuery: (event) => slowQueries.push(event),
+        slowQueryThresholdMs: 0,
+      },
+      repositories: [ProductRepository],
+    });
+    const products = npa.get(ProductRepository) as ProductRepository & DynamicRepository;
+
+    await products.findById(10);
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        adapter: "mysql",
+        text:
+          "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+        values: [10],
+        success: true,
+        rowCount: 1,
+        durationMs: expect.any(Number),
+      }),
+    ]);
+    expect(slowQueries).toEqual(events);
+  });
+
+  test("wraps MySQL driver errors with SQL context", async () => {
+    const events = [];
+    const driverError = Object.assign(new Error("Duplicate entry"), {
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+      sqlState: "23000",
+    });
+    const queryable = {
+      async query() {
+        throw driverError;
+      },
+    };
+    const npa = createNPA({
+      adapter: mysql({ queryable: asMysqlQueryable(queryable) }),
+      operations: {
+        logger: (event) => events.push(event),
+      },
+      repositories: [ProductRepository],
+    });
+    const products = npa.get(ProductRepository) as ProductRepository & DynamicRepository;
+
+    await expect(products.findById(10)).rejects.toMatchObject({
+      adapter: "mysql",
+      code: "ER_DUP_ENTRY",
+      errno: 1062,
+      name: "NPADatabaseError",
+      sqlState: "23000",
+      text:
+        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+      values: [10],
+    });
+
+    const error = await products.findById(10).catch((caught) => caught);
+    expect(error).toBeInstanceOf(NPADatabaseError);
+    expect(error.cause).toBe(driverError);
+    expect(events[0]).toEqual(expect.objectContaining({
+      adapter: "mysql",
+      error: expect.any(NPADatabaseError),
+      success: false,
+      text:
+        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+      values: [10],
+    }));
   });
 
   test("creates a transaction manager when MySQL adapter receives a connection", async () => {

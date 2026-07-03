@@ -48,6 +48,7 @@ import {
 } from "./mysql-identifiers";
 import { compileMysqlQuery } from "./mysql-query-compiler";
 import { compileMysqlRawQuery } from "./mysql-raw-query";
+import { instrumentMysqlQueryable } from "./mysql-operations";
 import {
   attachMysqlLazyRelations,
   loadMysqlRelations,
@@ -59,8 +60,16 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   implements NPARepositoryAdapter<TEntity, TId>
 {
   private readonly dirtyCheckAdapter: NPADirtyCheckAdapter<TEntity>;
+  private readonly options: MysqlRepositoryOptions;
 
-  constructor(private readonly options: MysqlRepositoryOptions) {
+  constructor(options: MysqlRepositoryOptions) {
+    this.options = {
+      ...options,
+      queryable: instrumentMysqlQueryable(
+        options.queryable,
+        options.operations,
+      ),
+    };
     this.dirtyCheckAdapter = this.createDirtyCheckAdapter(
       this.options.entity as EntityTarget<TEntity> | undefined,
     );
@@ -767,6 +776,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     return {
       entity,
+      operations: this.options.operations,
       preferExecute: this.options.preferExecute,
       queryable: this.options.queryable,
     };
