@@ -1,4 +1,5 @@
 import {
+  CascadeType,
   ColumnMetadata,
   ColumnOptions,
   EntityMetadata,
@@ -171,6 +172,8 @@ export function registerRelation(
     foreignKeyName: options.foreignKeyName,
     onDelete: options.onDelete,
     onUpdate: options.onUpdate,
+    cascade: normalizeCascade(options.cascade),
+    orphanRemoval: options.orphanRemoval ?? false,
   });
 }
 
@@ -280,6 +283,32 @@ function getOrCreateMutableMetadata(
   metadataByTarget.set(target, metadata);
 
   return metadata;
+}
+
+function normalizeCascade(
+  cascade: RelationOptions["cascade"],
+): CascadeType[] {
+  if (cascade === true) {
+    return [CascadeType.PERSIST, CascadeType.REMOVE];
+  }
+
+  if (!cascade) {
+    return [];
+  }
+
+  const values = Array.isArray(cascade) ? cascade : [cascade];
+  return [...new Set(values.map(readCascadeType))];
+}
+
+function readCascadeType(value: CascadeType | `${CascadeType}`): CascadeType {
+  switch (value) {
+    case CascadeType.PERSIST:
+      return CascadeType.PERSIST;
+    case CascadeType.REMOVE:
+      return CascadeType.REMOVE;
+    default:
+      throw new Error(`Unsupported cascade type "${value}".`);
+  }
 }
 
 function toPropertyName(propertyKey: string | symbol): string {

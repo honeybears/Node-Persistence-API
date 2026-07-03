@@ -122,6 +122,9 @@ class PgRole {
 
   @Column()
   name!: string;
+
+  @ManyToMany(() => PgMember, { mappedBy: "roles" })
+  members!: PgMember[];
 }
 
 @Entity({ name: "members" })
@@ -928,6 +931,200 @@ describe("PostgreSQL adapter", () => {
       {
         text: 'DELETE FROM "users"',
         values: [],
+      },
+    ]);
+  });
+
+  test("runs persist and remove through a PostgreSQL persistence context", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("INSERT")) {
+          return {
+            rows: [{ product_id: 7, product_name: values[0] }],
+            rowCount: 1,
+          };
+        }
+
+        return { rows: [], rowCount: 1 };
+      },
+    };
+    const repository = createPostgresqlDerivedQueryRepository(
+      {},
+      { entity: PgPlainProduct, queryable: asPgQueryable(queryable) },
+    ) as NPARepository<PgPlainProduct, number>;
+    const product = { name: "desk" } as PgPlainProduct;
+
+    expect(await repository.persist(product)).toBe(product);
+    expect(product.id).toEqual(7);
+    await repository.remove(product);
+
+    expect(calls).toEqual([
+      {
+        text: 'INSERT INTO "products" ("product_name") VALUES ($1) RETURNING *',
+        values: ["desk"],
+      },
+      {
+        text: 'DELETE FROM "products" WHERE "product_id" = $1',
+        values: [7],
+      },
+    ]);
+  });
+
+  test("syncs PostgreSQL many-to-many join rows during persist and remove", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith('INSERT INTO "members"')) {
+          return {
+            rows: [{ member_id: 1, name: values[0] }],
+            rowCount: 1,
+          };
+        }
+
+        return { rows: [], rowCount: 1 };
+      },
+    };
+    const repository = createPostgresqlDerivedQueryRepository(
+      {},
+      { entity: PgMember, queryable: asPgQueryable(queryable) },
+    ) as NPARepository<PgMember, number>;
+    const member = {
+      name: "kim",
+      roles: [{ id: 5, name: "admin" } as PgRole],
+    } as PgMember;
+
+    await repository.persist(member);
+    await repository.remove(member);
+
+    expect(calls).toEqual([
+      {
+        text: 'INSERT INTO "members" ("name") VALUES ($1) RETURNING *',
+        values: ["kim"],
+      },
+      {
+        text:
+          'DELETE FROM "member_roles" WHERE "pg_member_member_id" = $1',
+        values: [1],
+      },
+      {
+        text:
+          'INSERT INTO "member_roles" ("pg_member_member_id", "pg_role_role_id") VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        values: [1, 5],
+      },
+      {
+        text:
+          'DELETE FROM "member_roles" WHERE "pg_member_member_id" = $1',
+        values: [1],
+      },
+      {
+        text: 'DELETE FROM "members" WHERE "member_id" = $1',
+        values: [1],
+      },
+    ]);
+  });
+
+  test("syncs inverse PostgreSQL many-to-many join rows", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith('INSERT INTO "roles"')) {
+          return {
+            rows: [{ role_id: 5, name: values[0] }],
+            rowCount: 1,
+          };
+        }
+
+        return { rows: [], rowCount: 1 };
+      },
+    };
+    const repository = createPostgresqlDerivedQueryRepository(
+      {},
+      { entity: PgRole, queryable: asPgQueryable(queryable) },
+    ) as NPARepository<PgRole, number>;
+    const role = {
+      name: "admin",
+      members: [{ id: 1, name: "kim" } as PgMember],
+    } as PgRole;
+
+    await repository.persist(role);
+
+    expect(calls).toEqual([
+      {
+        text: 'INSERT INTO "roles" ("name") VALUES ($1) RETURNING *',
+        values: ["admin"],
+      },
+      {
+        text:
+          'DELETE FROM "member_roles" WHERE "pg_role_role_id" = $1',
+        values: [5],
+      },
+      {
+        text:
+          'INSERT INTO "member_roles" ("pg_role_role_id", "pg_member_member_id") VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        values: [5, 1],
+      },
+    ]);
+  });
+
+  test("runs PostgreSQL direct and derived deletes through ORM cleanup when relations need it", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("SELECT")) {
+          return {
+            rows: [{ member_id: values[0] === "kim" ? 2 : values[0], name: "kim" }],
+            rowCount: 1,
+          };
+        }
+
+        return { rows: [], rowCount: 1 };
+      },
+    };
+    const repository = createPostgresqlDerivedQueryRepository(
+      {},
+      { entity: PgMember, queryable: asPgQueryable(queryable) },
+    ) as NPARepository<PgMember, number> & {
+      deleteByName(name: string): Promise<number>;
+    };
+
+    expect(await repository.deleteById(1)).toEqual(1);
+    expect(await repository.deleteByName("kim")).toEqual(1);
+
+    expect(calls).toEqual([
+      {
+        text: 'SELECT * FROM "members" WHERE "member_id" = $1 LIMIT 1',
+        values: [1],
+      },
+      {
+        text:
+          'DELETE FROM "member_roles" WHERE "pg_member_member_id" = $1',
+        values: [1],
+      },
+      {
+        text: 'DELETE FROM "members" WHERE "member_id" = $1',
+        values: [1],
+      },
+      {
+        text: 'SELECT DISTINCT * FROM "members" WHERE ("name" = $1)',
+        values: ["kim"],
+      },
+      {
+        text:
+          'DELETE FROM "member_roles" WHERE "pg_member_member_id" = $1',
+        values: [2],
+      },
+      {
+        text: 'DELETE FROM "members" WHERE "member_id" = $1',
+        values: [2],
       },
     ]);
   });

@@ -1,11 +1,20 @@
 import {
+  defaultJoinTableName,
+  EntityMetadata,
   getCurrentPersistenceContext,
+  getEntityMetadata,
   getOptionalEntityMetadata,
   type EntityTarget,
+  joinTableColumnName,
+  needsOrmDelete,
   NPAEntityGraphMetadata,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
   NPALoadOptions,
+  PersistenceContext,
+  RelationKind,
+  RelationMetadata,
+  removeCascadeRelationTree,
   RepositoryMethodExecutor,
   RepositoryRawQueryExecutor,
   withUpdatedAtTimestamp,
@@ -22,6 +31,10 @@ import {
   compileMysqlVersionedUpdate,
   getMysqlPrimaryKeyValue,
 } from "./mysql-crud-compiler";
+import {
+  quoteMysqlIdentifier,
+  quoteMysqlQualifiedIdentifier,
+} from "./mysql-identifiers";
 import { compileMysqlQuery } from "./mysql-query-compiler";
 import { compileMysqlRawQuery } from "./mysql-raw-query";
 import {
@@ -34,37 +47,21 @@ import { MysqlRepositoryOptions } from "./types";
 export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   implements NPARepositoryAdapter<TEntity, TId>
 {
-  private readonly dirtyCheckAdapter: NPADirtyCheckAdapter<TEntity> = {
-    updateDirty: async (_entity, id, patch, updateOptions) => {
-      const touchedPatch = withUpdatedAtTimestamp(patch, this.options.entity);
-      const query = updateOptions?.versionColumn
-        ? compileMysqlVersionedUpdate(
-          id,
-          touchedPatch,
-          updateOptions.expectedVersion,
-          this.options,
-        )
-        : compileMysqlUpdate(id, touchedPatch, this.options);
-      const result = await executeMysqlQuery<TEntity>(
-        this.options,
-        query.text,
-        query.values,
-      );
+  private readonly dirtyCheckAdapter: NPADirtyCheckAdapter<TEntity>;
 
-      if (result.affectedRows === 0) {
-        return null;
-      }
-
-      const row = await this.findByIdRow(id as TId);
-      return row ? this.attachLazy([row])[0] : null;
-    },
-  };
-
-  constructor(private readonly options: MysqlRepositoryOptions) {}
+  constructor(private readonly options: MysqlRepositoryOptions) {
+    this.dirtyCheckAdapter = this.createDirtyCheckAdapter(
+      this.options.entity as EntityTarget<TEntity> | undefined,
+    );
+  }
 
   executeDerivedQuery: RepositoryMethodExecutor<Promise<unknown>> = async (
     invocation,
   ) => {
+    if (invocation.query.action === "delete" && this.shouldUseOrmDelete()) {
+      return this.executeOrmDerivedDelete(invocation);
+    }
+
     const query = compileMysqlQuery(invocation, this.options);
     const result = await executeMysqlQuery(
       this.options,
@@ -176,6 +173,27 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return Number(result.rows[0]?.count ?? 0);
   };
 
+  persist = async (entity: TEntity): Promise<TEntity> => {
+    const entityTarget = this.getEntityTarget();
+
+    if (!entityTarget) {
+      return this.insert(entity);
+    }
+
+    const currentContext = getCurrentPersistenceContext();
+    const context = currentContext ?? new PersistenceContext();
+    const persisted = await context.persist(entity, {
+      adapter: this.dirtyCheckAdapter,
+      entity: entityTarget,
+    });
+
+    if (!currentContext) {
+      await context.flush();
+    }
+
+    return persisted;
+  };
+
   save = async (entity: TEntity): Promise<TEntity | null> => {
     const id = getMysqlPrimaryKeyValue(entity, this.options);
     return id === null || id === undefined
@@ -235,6 +253,26 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return this.manage(row ? this.attachLazy([row])[0] : null);
   };
 
+  remove = async (entity: TEntity): Promise<void> => {
+    const entityTarget = this.getEntityTarget();
+
+    if (!entityTarget) {
+      await this.delete(entity);
+      return;
+    }
+
+    const currentContext = getCurrentPersistenceContext();
+    const context = currentContext ?? new PersistenceContext();
+    await context.remove(entity, {
+      adapter: this.dirtyCheckAdapter,
+      entity: entityTarget,
+    });
+
+    if (!currentContext) {
+      await context.flush();
+    }
+  };
+
   delete = async (entityOrId: TEntity | TId): Promise<number> => {
     const id =
       typeof entityOrId === "object" && entityOrId !== null
@@ -245,6 +283,16 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   };
 
   deleteById = async (id: TId): Promise<number> => {
+    if (this.shouldUseOrmDelete()) {
+      const entity = await this.findById(id, this.removeCascadeLoad());
+
+      if (!entity) {
+        return 0;
+      }
+
+      return this.removeLoadedEntities([entity]);
+    }
+
     const query = compileMysqlDeleteById(id, this.options);
     const result = await executeMysqlQuery(this.options, query.text, query.values);
     const deletedCount = result.affectedRows ?? 0;
@@ -257,6 +305,10 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   };
 
   deleteAll = async (): Promise<number> => {
+    if (this.shouldUseOrmDelete()) {
+      return this.removeLoadedEntities(await this.findAll(this.removeCascadeLoad()));
+    }
+
     const query = compileMysqlDeleteAll(this.options);
     const result = await executeMysqlQuery(this.options, query.text, query.values);
     this.detachAll();
@@ -330,8 +382,15 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   }
 
   private attachLazy(entities: TEntity[]): TEntity[] {
-    return attachMysqlLazyRelations(entities.filter((entity) => entity), {
-      entity: this.getEntityTarget(),
+    return this.attachLazyFor(entities, this.getEntityTarget());
+  }
+
+  private attachLazyFor<TTarget extends object>(
+    entities: TTarget[],
+    entity: EntityTarget<TTarget> | undefined,
+  ): TTarget[] {
+    return attachMysqlLazyRelations(entities.filter((target) => target), {
+      entity,
       preferExecute: this.options.preferExecute,
       queryable: this.options.queryable,
     });
@@ -393,8 +452,186 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     });
   }
 
+  private async executeOrmDerivedDelete(
+    invocation: Parameters<RepositoryMethodExecutor>[0],
+  ): Promise<number> {
+    const query = compileMysqlQuery({
+      ...invocation,
+      query: {
+        ...invocation.query,
+        action: "find",
+        distinct: true,
+      },
+    }, this.options);
+    const result = await executeMysqlQuery<TEntity>(
+      this.options,
+      query.text,
+      query.values,
+    );
+    const loaded = await this.loadRelations(result.rows, this.removeCascadeLoad());
+    return this.removeLoadedEntities(this.attachLazy(loaded));
+  }
+
+  private async removeLoadedEntities(entities: TEntity[]): Promise<number> {
+    const entityTarget = this.getEntityTarget();
+
+    if (!entityTarget) {
+      return 0;
+    }
+
+    const currentContext = getCurrentPersistenceContext();
+    const context = currentContext ?? new PersistenceContext();
+
+    for (const entity of entities) {
+      await context.remove(entity, {
+        adapter: this.dirtyCheckAdapter,
+        entity: entityTarget,
+      });
+    }
+
+    if (!currentContext) {
+      await context.flush();
+    }
+
+    return entities.length;
+  }
+
+  private shouldUseOrmDelete(): boolean {
+    const entityTarget = this.getEntityTarget();
+    return !!entityTarget && needsOrmDelete(getEntityMetadata(entityTarget));
+  }
+
+  private removeCascadeLoad(): NPALoadOptions<TEntity> | undefined {
+    const entityTarget = this.getEntityTarget();
+
+    if (!entityTarget) {
+      return undefined;
+    }
+
+    const relations = removeCascadeRelationTree(getEntityMetadata(entityTarget));
+    return relations ? { relations } as NPALoadOptions<TEntity> : undefined;
+  }
+
   private getEntityTarget(): EntityTarget<TEntity> | undefined {
     return this.options.entity as EntityTarget<TEntity> | undefined;
+  }
+
+  private createDirtyCheckAdapter<TTarget extends object>(
+    entity: EntityTarget<TTarget> | undefined,
+  ): NPADirtyCheckAdapter<TTarget> {
+    const options = this.optionsFor(entity);
+
+    return {
+      updateDirty: async (_entity, id, patch, updateOptions) => {
+        const touchedPatch = withUpdatedAtTimestamp(patch, entity);
+        const query = updateOptions?.versionColumn
+          ? compileMysqlVersionedUpdate(
+            id,
+            touchedPatch,
+            updateOptions.expectedVersion,
+            options,
+          )
+          : compileMysqlUpdate(id, touchedPatch, options);
+        const result = await executeMysqlQuery<TTarget>(
+          options,
+          query.text,
+          query.values,
+        );
+
+        if (result.affectedRows === 0) {
+          return null;
+        }
+
+        const row = await this.findByIdRowFor(id, options, entity);
+        return row ? this.attachLazyFor([row], entity)[0] : null;
+      },
+      insertManaged: async (targetEntity) => {
+        const query = compileMysqlInsert(targetEntity, options);
+        const result = await executeMysqlQuery<TTarget>(
+          options,
+          query.text,
+          query.values,
+        );
+        const id = getMysqlPrimaryKeyValue(targetEntity, options) ?? result.insertId;
+
+        if (id === null || id === undefined) {
+          return this.attachLazyFor([targetEntity], entity)[0];
+        }
+
+        return this.attachLazyFor(
+          [(await this.findByIdRowFor(id, options, entity)) ?? targetEntity],
+          entity,
+        )[0];
+      },
+      deleteManaged: async (_targetEntity, id) => {
+        const query = compileMysqlDeleteById(id, options);
+        const result = await executeMysqlQuery(options, query.text, query.values);
+        return result.affectedRows ?? 0;
+      },
+      syncManyToManyRelations: async (_targetEntity, id, relation, targetIds) => {
+        const metadata = requireAdapterMetadata(entity, "sync many-to-many relations");
+        const join = manyToManyJoin(metadata, relation);
+        const sourceColumn = relation.mappedBy ? join.targetColumn : join.sourceColumn;
+        const targetColumn = relation.mappedBy ? join.sourceColumn : join.targetColumn;
+        await executeMysqlQuery(
+          options,
+          `DELETE FROM ${join.table} WHERE ${quoteMysqlIdentifier(sourceColumn)} = ?`,
+          [id],
+        );
+
+        if (targetIds.length === 0) {
+          return;
+        }
+
+        const placeholders = targetIds.map(() => "(?, ?)").join(", ");
+        const values = targetIds.flatMap((targetId) => [id, targetId]);
+        await executeMysqlQuery(
+          options,
+          `INSERT IGNORE INTO ${join.table} (${quoteMysqlIdentifier(sourceColumn)}, ${quoteMysqlIdentifier(targetColumn)}) VALUES ${placeholders}`,
+          values,
+        );
+      },
+      deleteManyToManyRelations: async (_targetEntity, id, relation) => {
+        const metadata = requireAdapterMetadata(entity, "delete many-to-many relations");
+        const join = manyToManyJoin(metadata, relation);
+        const column = relation.mappedBy ? join.targetColumn : join.sourceColumn;
+        await executeMysqlQuery(
+          options,
+          `DELETE FROM ${join.table} WHERE ${quoteMysqlIdentifier(column)} = ?`,
+          [id],
+        );
+      },
+      forEntity: (target) => this.createDirtyCheckAdapter(target),
+    };
+  }
+
+  private async findByIdRowFor<TTarget extends object>(
+    id: unknown,
+    options: MysqlRepositoryOptions,
+    _entity: EntityTarget<TTarget> | undefined,
+  ): Promise<TTarget | null> {
+    const query = compileMysqlFindById(id, options);
+    const result = await executeMysqlQuery<TTarget>(
+      options,
+      query.text,
+      query.values,
+    );
+
+    return result.rows[0] ?? null;
+  }
+
+  private optionsFor<TTarget extends object>(
+    entity: EntityTarget<TTarget> | undefined,
+  ): MysqlRepositoryOptions {
+    if (!entity || entity === this.options.entity) {
+      return { ...this.options, entity };
+    }
+
+    return {
+      entity,
+      preferExecute: this.options.preferExecute,
+      queryable: this.options.queryable,
+    };
   }
 }
 
@@ -405,6 +642,70 @@ function firstColumn(row: object | null): unknown {
 
   const [value] = Object.values(row);
   return value ?? null;
+}
+
+interface ManyToManyJoin {
+  table: string;
+  sourceColumn: string;
+  targetColumn: string;
+}
+
+function manyToManyJoin(
+  source: EntityMetadata,
+  relation: RelationMetadata,
+): ManyToManyJoin {
+  const target = getEntityMetadata(relation.target());
+
+  if (relation.mappedBy) {
+    const owner = target.relations.find((candidate) =>
+      candidate.kind === RelationKind.MANY_TO_MANY &&
+      candidate.propertyName === relation.mappedBy,
+    );
+
+    if (!owner) {
+      throw new Error(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+    }
+
+    return {
+      table: qualifiedJoinTable(target, source, owner),
+      sourceColumn: joinTableColumnName(target),
+      targetColumn: joinTableColumnName(source),
+    };
+  }
+
+  return {
+    table: qualifiedJoinTable(source, target, relation),
+    sourceColumn: joinTableColumnName(source),
+    targetColumn: joinTableColumnName(target),
+  };
+}
+
+function qualifiedJoinTable(
+  source: EntityMetadata,
+  target: EntityMetadata,
+  relation: RelationMetadata,
+): string {
+  const rawName = relation.joinTable ?? defaultJoinTableName(source, target);
+  const separatorIndex = rawName.indexOf(".");
+
+  if (separatorIndex > 0) {
+    return `${quoteMysqlQualifiedIdentifier(rawName.slice(0, separatorIndex))}.${quoteMysqlQualifiedIdentifier(rawName.slice(separatorIndex + 1))}`;
+  }
+
+  const table = quoteMysqlQualifiedIdentifier(rawName);
+  const schema = source.schema ?? target.schema;
+  return schema ? `${quoteMysqlQualifiedIdentifier(schema)}.${table}` : table;
+}
+
+function requireAdapterMetadata<TEntity extends object>(
+  entity: EntityTarget<TEntity> | undefined,
+  operation: string,
+): EntityMetadata {
+  if (!entity) {
+    throw new Error(`MySQL ${operation} requires entity metadata.`);
+  }
+
+  return getEntityMetadata(entity);
 }
 
 function toEntityGraphLoad<TEntity extends object>(

@@ -238,16 +238,15 @@ async function loadManyToMany<TEntity extends object>(
     return [];
   }
 
+  const join = manyToManyJoin(metadata, relation);
   const targetPrimary = requirePrimaryColumn(targetMetadata);
-  const sourceColumn = joinTableColumnName(metadata);
-  const targetColumn = joinTableColumnName(targetMetadata);
   const placeholders = sourceIds.map((_, index) => `$${index + 1}`).join(", ");
   const result = await queryable.query<Record<string, unknown>>(
     [
-      `SELECT j.${quoteIdentifier(sourceColumn)} AS "__npa_source_id", t.*`,
-      `FROM ${qualifiedJoinTable(metadata, targetMetadata, relation)} j`,
-      `JOIN ${qualifiedTable(targetMetadata)} t ON t.${quoteIdentifier(targetPrimary.columnName)} = j.${quoteIdentifier(targetColumn)}`,
-      `WHERE j.${quoteIdentifier(sourceColumn)} IN (${placeholders})`,
+      `SELECT j.${quoteIdentifier(join.currentColumn)} AS "__npa_source_id", t.*`,
+      `FROM ${join.table} j`,
+      `JOIN ${qualifiedTable(targetMetadata)} t ON t.${quoteIdentifier(targetPrimary.columnName)} = j.${quoteIdentifier(join.relatedColumn)}`,
+      `WHERE j.${quoteIdentifier(join.currentColumn)} IN (${placeholders})`,
     ].join("\n"),
     sourceIds,
   );
@@ -261,6 +260,42 @@ async function loadManyToMany<TEntity extends object>(
   }
 
   return flattenRelationValues(entities, relation);
+}
+
+interface ManyToManyJoin {
+  table: string;
+  currentColumn: string;
+  relatedColumn: string;
+}
+
+function manyToManyJoin(
+  source: EntityMetadata,
+  relation: RelationMetadata,
+): ManyToManyJoin {
+  const target = getEntityMetadata(relation.target());
+
+  if (relation.mappedBy) {
+    const owner = target.relations.find((candidate) =>
+      candidate.kind === RelationKind.MANY_TO_MANY &&
+      candidate.propertyName === relation.mappedBy,
+    );
+
+    if (!owner) {
+      throw new Error(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+    }
+
+    return {
+      table: qualifiedJoinTable(target, source, owner),
+      currentColumn: joinTableColumnName(source),
+      relatedColumn: joinTableColumnName(target),
+    };
+  }
+
+  return {
+    table: qualifiedJoinTable(source, target, relation),
+    currentColumn: joinTableColumnName(source),
+    relatedColumn: joinTableColumnName(target),
+  };
 }
 
 async function selectRowsByColumn(

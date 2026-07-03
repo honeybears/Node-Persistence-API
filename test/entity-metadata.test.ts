@@ -1,5 +1,6 @@
 import { describe, expect, test } from "@jest/globals";
 import {
+  CascadeType,
   Column,
   CreatedAt,
   Entity,
@@ -35,7 +36,7 @@ class Team {
   @Column()
   name!: string;
 
-  @OneToMany(() => User, { mappedBy: "team" })
+  @OneToMany(() => User, { mappedBy: "team", orphanRemoval: true })
   users?: User[];
 }
 
@@ -72,7 +73,10 @@ class User {
   @Version({ name: "lock_version" })
   version!: number;
 
-  @ManyToOne(() => Team, { joinColumn: "team_id" })
+  @ManyToOne(() => Team, {
+    joinColumn: "team_id",
+    cascade: [CascadeType.PERSIST, CascadeType.REMOVE],
+  })
   team?: Team;
 
   @ManyToMany(() => Role, { joinTable: "user_roles" })
@@ -181,6 +185,8 @@ describe("entity metadata", () => {
           kind: relation.kind,
           joinColumn: relation.joinColumn,
           joinTable: relation.joinTable,
+          cascade: relation.cascade,
+          orphanRemoval: relation.orphanRemoval,
         })),
       ).toEqual([
         {
@@ -188,14 +194,22 @@ describe("entity metadata", () => {
           kind: RelationKind.MANY_TO_ONE,
           joinColumn: "team_id",
           joinTable: undefined,
+          cascade: [CascadeType.PERSIST, CascadeType.REMOVE],
+          orphanRemoval: false,
         },
         {
           propertyName: "roles",
           kind: RelationKind.MANY_TO_MANY,
           joinColumn: undefined,
           joinTable: "user_roles",
+          cascade: [],
+          orphanRemoval: false,
         },
       ]);
+      expect(getEntityMetadata(Team).relations[0]).toMatchObject({
+        propertyName: "users",
+        orphanRemoval: true,
+      });
     });
 
     test("registers explicit id generation strategy metadata", () => {

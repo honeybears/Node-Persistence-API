@@ -68,6 +68,9 @@ class Role {
 
   @Column()
   name!: string;
+
+  @ManyToMany(() => Member, { mappedBy: "roles" })
+  members!: Member[];
 }
 
 @Entity({ name: "members" })
@@ -776,6 +779,215 @@ describe("MySQL adapter", () => {
       {
         text: "DELETE FROM `shop`.`products`",
         values: [],
+      },
+    ]);
+  });
+
+  test("runs persist and remove through a MySQL persistence context", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("INSERT")) {
+          return [{ affectedRows: 1, insertId: 10 }, []];
+        }
+
+        if (text.startsWith("SELECT")) {
+          return [[{ product_id: values[0], product_name: "desk" }], []];
+        }
+
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+    const repository = createMysqlDerivedQueryRepository(
+      {},
+      { entity: Product, queryable: asMysqlQueryable(queryable) },
+    ) as NPARepository<Product, number>;
+    const product = {
+      name: "desk",
+      price: 120,
+      active: true,
+      status: "active",
+      createdAt: 1,
+    } as Product;
+
+    expect(await repository.persist(product)).toBe(product);
+    expect(product.id).toEqual(10);
+    await repository.remove(product);
+
+    expect(calls).toEqual([
+      {
+        text:
+          "INSERT INTO `shop`.`products` (`product_name`, `price`, `active`, `status`, `created_at`) VALUES (?, ?, ?, ?, ?)",
+        values: ["desk", 120, true, "active", 1],
+      },
+      {
+        text:
+          "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+        values: [10],
+      },
+      {
+        text: "DELETE FROM `shop`.`products` WHERE `product_id` = ?",
+        values: [10],
+      },
+    ]);
+  });
+
+  test("syncs MySQL many-to-many join rows during persist and remove", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("INSERT INTO `members`")) {
+          return [{ affectedRows: 1, insertId: 1 }, []];
+        }
+
+        if (text.startsWith("SELECT")) {
+          return [[{ member_id: values[0], name: "kim" }], []];
+        }
+
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+    const repository = createMysqlDerivedQueryRepository(
+      {},
+      { entity: Member, queryable: asMysqlQueryable(queryable) },
+    ) as NPARepository<Member, number>;
+    const member = {
+      name: "kim",
+      roles: [{ id: 5, name: "admin" } as Role],
+    } as Member;
+
+    await repository.persist(member);
+    await repository.remove(member);
+
+    expect(calls).toEqual([
+      {
+        text: "INSERT INTO `members` (`name`) VALUES (?)",
+        values: ["kim"],
+      },
+      {
+        text: "SELECT * FROM `members` WHERE `member_id` = ? LIMIT 1",
+        values: [1],
+      },
+      {
+        text: "DELETE FROM `member_roles` WHERE `member_id` = ?",
+        values: [1],
+      },
+      {
+        text:
+          "INSERT IGNORE INTO `member_roles` (`member_id`, `role_id`) VALUES (?, ?)",
+        values: [1, 5],
+      },
+      {
+        text: "DELETE FROM `member_roles` WHERE `member_id` = ?",
+        values: [1],
+      },
+      {
+        text: "DELETE FROM `members` WHERE `member_id` = ?",
+        values: [1],
+      },
+    ]);
+  });
+
+  test("syncs inverse MySQL many-to-many join rows", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("INSERT INTO `roles`")) {
+          return [{ affectedRows: 1, insertId: 5 }, []];
+        }
+
+        if (text.startsWith("SELECT")) {
+          return [[{ role_id: values[0], name: "admin" }], []];
+        }
+
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+    const repository = createMysqlDerivedQueryRepository(
+      {},
+      { entity: Role, queryable: asMysqlQueryable(queryable) },
+    ) as NPARepository<Role, number>;
+    const role = {
+      name: "admin",
+      members: [{ id: 1, name: "kim" } as Member],
+    } as Role;
+
+    await repository.persist(role);
+
+    expect(calls).toEqual([
+      {
+        text: "INSERT INTO `roles` (`name`) VALUES (?)",
+        values: ["admin"],
+      },
+      {
+        text: "SELECT * FROM `roles` WHERE `role_id` = ? LIMIT 1",
+        values: [5],
+      },
+      {
+        text: "DELETE FROM `member_roles` WHERE `role_id` = ?",
+        values: [5],
+      },
+      {
+        text:
+          "INSERT IGNORE INTO `member_roles` (`role_id`, `member_id`) VALUES (?, ?)",
+        values: [5, 1],
+      },
+    ]);
+  });
+
+  test("runs MySQL direct and derived deletes through ORM cleanup when relations need it", async () => {
+    const calls = [];
+    const queryable = {
+      async query(text, values) {
+        calls.push({ text, values });
+
+        if (text.startsWith("SELECT")) {
+          return [[{ member_id: values[0] === "kim" ? 2 : values[0], name: "kim" }], []];
+        }
+
+        return [{ affectedRows: 1 }, []];
+      },
+    };
+    const repository = createMysqlDerivedQueryRepository(
+      {},
+      { entity: Member, queryable: asMysqlQueryable(queryable) },
+    ) as NPARepository<Member, number> & {
+      deleteByName(name: string): Promise<number>;
+    };
+
+    expect(await repository.deleteById(1)).toEqual(1);
+    expect(await repository.deleteByName("kim")).toEqual(1);
+
+    expect(calls).toEqual([
+      {
+        text: "SELECT * FROM `members` WHERE `member_id` = ? LIMIT 1",
+        values: [1],
+      },
+      {
+        text: "DELETE FROM `member_roles` WHERE `member_id` = ?",
+        values: [1],
+      },
+      {
+        text: "DELETE FROM `members` WHERE `member_id` = ?",
+        values: [1],
+      },
+      {
+        text: "SELECT DISTINCT * FROM `members` WHERE (`name` = ?)",
+        values: ["kim"],
+      },
+      {
+        text: "DELETE FROM `member_roles` WHERE `member_id` = ?",
+        values: [2],
+      },
+      {
+        text: "DELETE FROM `members` WHERE `member_id` = ?",
+        values: [2],
       },
     ]);
   });

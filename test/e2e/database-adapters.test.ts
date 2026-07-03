@@ -1,4 +1,4 @@
-import { Column, Entity, Id, ManyToOne, ManyToMany, NPARepository, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
+import { CascadeType, Column, Entity, Id, ManyToOne, ManyToMany, NPARepository, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
 import { assertRepositoryContract, createProductEntity, databaseAdapters, runDatabaseFlow, startContainerOrSkip, uniqueTableName } from "./database-flow";
 import { describe, expect, test } from "@jest/globals";
 
@@ -180,6 +180,115 @@ describe("database adapter E2E", () => {
             await runtime.close();
           }
         }),
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
+      `runs ${adapter.name} cascade and orphanRemoval E2E against a real database`,
+      async () => {
+        const teamTableName = uniqueTableName(`${adapter.tablePrefix}_cascade_teams`);
+        const memberTableName = uniqueTableName(`${adapter.tablePrefix}_cascade_members`);
+        const roleTableName = uniqueTableName(`${adapter.tablePrefix}_cascade_roles`);
+        const memberRoleTableName = uniqueTableName(`${adapter.tablePrefix}_cascade_member_roles`);
+        const container = await startContainerOrSkip(adapter.createContainer());
+
+        if (!container) {
+          return;
+        }
+
+        const runtime = await adapter.createTransactionRuntime(container);
+        const queryable = runtime.queryable;
+
+        try {
+          await adapter.executeSql(queryable, createTeamTableSql(adapter, teamTableName));
+          await adapter.executeSql(
+            queryable,
+            createMemberTableSql(adapter, memberTableName, teamTableName),
+          );
+          await adapter.executeSql(queryable, createRoleTableSql(adapter, roleTableName));
+          await adapter.executeSql(
+            queryable,
+            createMemberRoleTableSql(
+              adapter,
+              memberRoleTableName,
+              memberTableName,
+              roleTableName,
+            ),
+          );
+
+          const { Team, Member, Role } = createCascadeTeamMemberEntities(
+            teamTableName,
+            memberTableName,
+            roleTableName,
+            memberRoleTableName,
+          );
+          const teams = adapter.createRepository({ entity: Team, queryable }) as NPARepository<Row, unknown>;
+          const members = adapter.createRepository({ entity: Member, queryable }) as NPARepository<Row, unknown>;
+          const roles = adapter.createRepository({ entity: Role, queryable }) as NPARepository<Row, unknown>;
+          const team = {
+            label: "platform",
+            members: [
+              { name: "kim", roles: [{ name: "admin" }] },
+              { name: "lee", roles: [{ name: "writer" }] },
+            ],
+          } as Row;
+
+          await teams.persist(team);
+
+          const teamId = entityId(team, "team_id");
+          expect(await teams.count()).toEqual(1);
+          expect(await members.count()).toEqual(2);
+          expect(await roles.count()).toEqual(2);
+          expect(await tableCount(adapter, queryable, memberRoleTableName)).toEqual(2);
+
+          await runtime.manager.transactional(async () => {
+            const managedTeam = await teams.findById(teamId, {
+              relations: { members: { roles: true } },
+            });
+
+            if (!managedTeam) {
+              throw new Error("Managed team was not found.");
+            }
+
+            managedTeam.members = (managedTeam.members as Row[])
+              .filter((member) => member.name !== "lee");
+          });
+
+          expect(await members.count()).toEqual(1);
+          expect(await roles.count()).toEqual(1);
+          expect(await tableCount(adapter, queryable, memberRoleTableName)).toEqual(1);
+
+          expect(await teams.deleteById(teamId)).toEqual(1);
+          expect(await teams.count()).toEqual(0);
+          expect(await members.count()).toEqual(0);
+          expect(await roles.count()).toEqual(0);
+          expect(await tableCount(adapter, queryable, memberRoleTableName)).toEqual(0);
+        } finally {
+          try {
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(memberRoleTableName)}`,
+            );
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(memberTableName)}`,
+            );
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(roleTableName)}`,
+            );
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(teamTableName)}`,
+            );
+          } finally {
+            await runtime.close();
+            await container.stop();
+          }
+        }
+      },
       240_000,
     );
   }
@@ -393,8 +502,12 @@ function createTeamTableSql(adapter, tableName) {
   `;
 }
 
-function createMemberTableSql(adapter, tableName) {
+function createMemberTableSql(adapter, tableName, teamTableName?) {
   const table = adapter.quoteIdentifier(tableName);
+  const team = teamTableName ? adapter.quoteIdentifier(teamTableName) : null;
+  const foreignKey = team
+    ? `,\n        FOREIGN KEY (team_id) REFERENCES ${team} (team_id)`
+    : "";
 
   if (adapter.adapterName === "mysql") {
     return `
@@ -402,6 +515,7 @@ function createMemberTableSql(adapter, tableName) {
         member_id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         team_id INT NULL
+        ${foreignKey}
       )
     `;
   }
@@ -411,6 +525,7 @@ function createMemberTableSql(adapter, tableName) {
       member_id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       team_id INTEGER NULL
+      ${foreignKey}
     )
   `;
 }
@@ -435,13 +550,22 @@ function createRoleTableSql(adapter, tableName) {
   `;
 }
 
-function createMemberRoleTableSql(adapter, tableName) {
+function createMemberRoleTableSql(adapter, tableName, memberTableName?, roleTableName?) {
   const table = adapter.quoteIdentifier(tableName);
+  const member = memberTableName ? adapter.quoteIdentifier(memberTableName) : null;
+  const role = roleTableName ? adapter.quoteIdentifier(roleTableName) : null;
+  const constraints = member && role
+    ? `,
+      PRIMARY KEY (member_id, role_id),
+      FOREIGN KEY (member_id) REFERENCES ${member} (member_id),
+      FOREIGN KEY (role_id) REFERENCES ${role} (role_id)`
+    : "";
 
   return `
     CREATE TABLE ${table} (
       member_id INT NOT NULL,
       role_id INT NOT NULL
+      ${constraints}
     )
   `;
 }
@@ -453,4 +577,54 @@ function insertMemberRoleSql(adapter, tableName, memberId, roleId) {
     INSERT INTO ${table} (member_id, role_id)
     VALUES (${Number(memberId)}, ${Number(roleId)})
   `;
+}
+
+function createCascadeTeamMemberEntities(
+  teamTableName,
+  memberTableName,
+  roleTableName,
+  memberRoleTableName,
+) {
+  class Team {}
+  class Member {}
+  class Role {}
+
+  Id({ name: "team_id" })(Team.prototype, "id");
+  Column()(Team.prototype, "label");
+  OneToMany(() => Member, {
+    mappedBy: "team",
+    cascade: [CascadeType.PERSIST],
+    orphanRemoval: true,
+  })(Team.prototype, "members");
+  Entity({ name: teamTableName })(Team);
+
+  Id({ name: "member_id" })(Member.prototype, "id");
+  Column()(Member.prototype, "name");
+  ManyToOne(() => Team, { joinColumn: "team_id" })(Member.prototype, "team");
+  ManyToMany(() => Role, {
+    joinTable: memberRoleTableName,
+    cascade: [CascadeType.PERSIST, CascadeType.REMOVE],
+  })(Member.prototype, "roles");
+  Entity({ name: memberTableName })(Member);
+
+  Id({ name: "role_id" })(Role.prototype, "id");
+  Column()(Role.prototype, "name");
+  ManyToMany(() => Member, { mappedBy: "roles" })(Role.prototype, "members");
+  Entity({ name: roleTableName })(Role);
+
+  return { Team, Member, Role };
+}
+
+async function tableCount(adapter, queryable, tableName) {
+  const result = await adapter.executeSql(
+    queryable,
+    `SELECT COUNT(*) AS count FROM ${adapter.quoteIdentifier(tableName)}`,
+  );
+  const rows = Array.isArray(result) ? result[0] : result.rows;
+
+  return Number(rows[0].count);
+}
+
+function entityId(entity, columnName) {
+  return entity.id ?? entity[columnName];
 }

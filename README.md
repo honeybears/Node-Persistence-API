@@ -47,6 +47,7 @@ exercise a real database.
 import {
   Column,
   CreatedAt,
+  CascadeType,
   Entity,
   GenerationStrategy,
   Id,
@@ -85,6 +86,7 @@ class User {
     joinColumn: 'team_id',
     foreignKeyName: 'fk_users_team',
     onDelete: ReferentialAction.SET_NULL,
+    cascade: [CascadeType.PERSIST],
   })
   team?: Relation<Team | null>;
 
@@ -111,17 +113,24 @@ unique indexes. `@Column({ index: true })` and
 `@ManyToOne` creates a nullable foreign-key column using `joinColumn` or the
 default `<property>_<targetIdColumn>` name. Use `foreignKeyName`, `onDelete`,
 and `onUpdate` to control generated constraints. `@OneToMany` requires
-`mappedBy`; `@ManyToMany` creates a join table. `Relation<T>` lets a relation
-field hold either a lazy promise or an explicitly loaded value. Entity classes
-must be exported so repositories, application code, and migration tooling can
-reference them.
+`mappedBy`; `@ManyToMany` creates a join table. Use `cascade` with
+`[CascadeType.PERSIST]` or `CascadeType.REMOVE` for loaded or lazy relation
+values that should be persisted or removed with the owning operation. For
+`@ManyToMany`, `PERSIST` can persist id-less targets and `REMOVE` deletes target
+entities when configured; remove operations also clean join rows. Loaded owner
+or inverse `@ManyToMany` arrays flush join-table rows. Loaded `@OneToMany`
+arrays update the owning `@ManyToOne` foreign key; set `orphanRemoval: true` to
+delete children removed from the collection. `Relation<T>` lets a relation field
+hold either a lazy promise or an explicitly loaded value. Entity classes must be
+exported so repositories, application code, and migration tooling can reference
+them.
 
 ## Repository Usage
 
 Application code extends only NPA, not a database-specific repository type.
 `NPARepository` provides familiar persistence base methods including `findById`,
-`findAll`, `existsById`, `count`, `save`, `insert`, `update`, `updateById`,
-`delete`, `deleteById`, and `deleteAll`.
+`findAll`, `existsById`, `count`, `persist`, `save`, `insert`, `update`,
+`updateById`, `remove`, `delete`, `deleteById`, and `deleteAll`.
 
 Declare repositories as abstract classes and bind them to entities with
 `@Repository`. Imported decorated repositories are auto-registered when
@@ -471,13 +480,17 @@ Repository results loaded inside a transaction are managed by the active
 transaction flushes changed columns before commit. If the entity has `@Version`,
 NPA updates with `WHERE id = ? AND version = ?`, increments the version column,
 and throws `OptimisticLockError` when no row matches the expected version.
+`repository.persist(entity)` and `repository.remove(entity)` also use the active
+context, so inserts and deletes flush with the transaction.
 
 ## Runtime Flow
 
 1. Service code calls a method on `UserRepository`.
 2. Familiar persistence base methods (`findById`, `findAll`, `existsById`, `count`,
-   `save`, `insert`, `updateById`, `deleteById`, `deleteAll`) go through the NPA
-   adapter directly.
+   `persist`, `save`, `insert`, `updateById`, `remove`, `deleteById`,
+   `deleteAll`) go through the NPA adapter directly or the active persistence
+   context. Deletes on entities with cascade remove or join-table cleanup load
+   matching rows and run the remove path.
 3. Derived methods (`findBy...`, `existsBy...`, `countBy...`, `deleteBy...`) are
    parsed into a query AST.
 4. The selected adapter compiles the AST with entity metadata and executes it.
@@ -536,7 +549,7 @@ before treating NPA as a fuller ORM:
 - Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
 - Query API: add pagination, runtime sort, projection/select clauses, aggregate/groupBy support, and bulk update by condition.
 - Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
-- Relations: support cascade persist/remove, orphan removal, eager/lazy fetch strategies, and safer relation mutation helpers.
+- Relations: support eager fetch strategies and safer relation mutation helpers.
 - Entity mapping: add composite keys, enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks and richer DDL for defaults/generated columns/enums.
 - Transactions: add savepoint-backed nested transactions, more propagation modes, and stricter read-only/flush behavior.

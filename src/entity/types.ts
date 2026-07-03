@@ -41,12 +41,19 @@ export interface RelationOptions {
   foreignKeyName?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
+  cascade?: boolean | CascadeType | `${CascadeType}` | Array<CascadeType | `${CascadeType}`>;
+  orphanRemoval?: boolean;
 }
 
 export enum RelationKind {
   ONE_TO_MANY = "ONE_TO_MANY",
   MANY_TO_ONE = "MANY_TO_ONE",
   MANY_TO_MANY = "MANY_TO_MANY",
+}
+
+export enum CascadeType {
+  PERSIST = "PERSIST",
+  REMOVE = "REMOVE",
 }
 
 export enum ReferentialAction {
@@ -87,6 +94,8 @@ export interface RelationMetadata {
   foreignKeyName?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
+  cascade: CascadeType[];
+  orphanRemoval: boolean;
 }
 
 export interface EntityMetadata {

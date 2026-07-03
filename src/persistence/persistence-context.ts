@@ -1,7 +1,10 @@
 import {
+  CascadeType,
   ColumnMetadata,
   EntityMetadata,
+  EntityTarget,
   getEntityMetadata,
+  readEntityPrimaryValue,
   readRelationForeignKeyValue,
   relationJoinColumnName,
   RelationKind,
@@ -12,6 +15,11 @@ import { NPADirtyCheckAdapter, NPAManageEntityOptions } from "./types";
 
 type EntitySnapshot = Map<string, unknown>;
 
+interface ToManySnapshot {
+  ids: unknown[];
+  entities: object[];
+}
+
 interface ManagedEntity<TEntity extends object = object> {
   adapter: NPADirtyCheckAdapter<TEntity>;
   entity: TEntity;
@@ -21,6 +29,8 @@ interface ManagedEntity<TEntity extends object = object> {
 
 export class PersistenceContext {
   private readonly managed = new Map<object, ManagedEntity>();
+  private readonly newEntities = new Set<object>();
+  private readonly removedEntities = new Set<object>();
   private identityMap = new WeakMap<
     NPADirtyCheckAdapter,
     WeakMap<object, Map<unknown, ManagedEntity>>
@@ -69,6 +79,20 @@ export class PersistenceContext {
     this.rememberIdentity(options.adapter, metadata.target, id, managed);
 
     return entity;
+  }
+
+  persist<TEntity extends object>(
+    entity: TEntity,
+    options: NPAManageEntityOptions<TEntity>,
+  ): Promise<TEntity> {
+    return this.persistCascade(entity, options, new Set());
+  }
+
+  remove<TEntity extends object>(
+    entity: TEntity,
+    options: NPAManageEntityOptions<TEntity>,
+  ): Promise<void> {
+    return this.removeCascade(entity, options, new Set());
   }
 
   findManagedById<TEntity extends object>(
@@ -131,14 +155,28 @@ export class PersistenceContext {
 
   clear(): void {
     this.managed.clear();
+    this.newEntities.clear();
+    this.removedEntities.clear();
     this.identityMap = new WeakMap();
   }
 
   async flush(): Promise<void> {
-    for (const managed of [...this.managed.values()]) {
-      const patch = diffEntity(managed.entity, managed.snapshot, managed.metadata);
+    await this.flushNewEntities();
 
-      if (Object.keys(patch).length === 0) {
+    for (const managed of [...this.managed.values()]) {
+      if (this.newEntities.has(managed.entity) || this.removedEntities.has(managed.entity)) {
+        continue;
+      }
+
+      const patch = diffEntity(managed.entity, managed.snapshot, managed.metadata);
+      const hasManyToManyChanges = hasLoadedManyToManyChanges(managed);
+      const hasOneToManyChanges = hasLoadedOneToManyChanges(managed);
+
+      if (
+        Object.keys(patch).length === 0 &&
+        !hasOneToManyChanges &&
+        !hasManyToManyChanges
+      ) {
         continue;
       }
 
@@ -151,52 +189,431 @@ export class PersistenceContext {
         );
       }
 
-      const versionColumn = managed.metadata.versionColumn;
-      const expectedVersion = versionColumn
-        ? managed.snapshot.get(versionColumn.propertyName)
-        : undefined;
+      if (Object.keys(patch).length > 0) {
+        const versionColumn = managed.metadata.versionColumn;
+        const expectedVersion = versionColumn
+          ? managed.snapshot.get(versionColumn.propertyName)
+          : undefined;
 
-      if (versionColumn && (expectedVersion === null || expectedVersion === undefined)) {
-        throw new Error(
-          `Cannot flush versioned entity "${managed.metadata.target.name}" without a version value.`,
-        );
-      }
+        if (versionColumn && (expectedVersion === null || expectedVersion === undefined)) {
+          throw new Error(
+            `Cannot flush versioned entity "${managed.metadata.target.name}" without a version value.`,
+          );
+        }
 
-      const updated = await managed.adapter.updateDirty(managed.entity, id, patch, {
-        expectedVersion,
-        versionColumn,
-      });
-
-      if (!updated && versionColumn) {
-        throw new OptimisticLockError(
-          managed.metadata.target.name,
-          id,
+        const updated = await managed.adapter.updateDirty(managed.entity, id, patch, {
           expectedVersion,
-        );
-      }
-
-      if (updated && versionColumn) {
-        writeColumnValue(
-          managed.entity,
           versionColumn,
-          readColumnValue(updated, versionColumn),
-        );
-      }
+        });
 
-      if (updated && managed.metadata.updatedAtColumn) {
-        const updatedAt = readColumnValue(updated, managed.metadata.updatedAtColumn);
+        if (!updated && versionColumn) {
+          throw new OptimisticLockError(
+            managed.metadata.target.name,
+            id,
+            expectedVersion,
+          );
+        }
 
-        if (updatedAt !== undefined) {
+        if (updated && versionColumn) {
           writeColumnValue(
             managed.entity,
-            managed.metadata.updatedAtColumn,
-            updatedAt,
+            versionColumn,
+            readColumnValue(updated, versionColumn),
           );
+        }
+
+        if (updated && managed.metadata.updatedAtColumn) {
+          const updatedAt = readColumnValue(updated, managed.metadata.updatedAtColumn);
+
+          if (updatedAt !== undefined) {
+            writeColumnValue(
+              managed.entity,
+              managed.metadata.updatedAtColumn,
+              updatedAt,
+            );
+          }
         }
       }
 
+      await this.flushOneToManyChanges(managed);
+      await this.flushManyToManyChanges(managed);
       managed.snapshot = snapshotEntity(managed.entity, managed.metadata);
     }
+
+    await this.flushRemovedEntities();
+  }
+
+  private async persistCascade<TEntity extends object>(
+    entity: TEntity,
+    options: NPAManageEntityOptions<TEntity>,
+    seen: Set<object>,
+  ): Promise<TEntity> {
+    if (seen.has(entity)) {
+      return entity;
+    }
+
+    seen.add(entity);
+
+    const existing = this.findExistingManaged(entity, options);
+    const managedEntity = this.manage(entity, options);
+    const managed = this.managed.get(managedEntity);
+
+    if (!managed) {
+      return managedEntity;
+    }
+
+    this.removedEntities.delete(managed.entity);
+
+    if (!existing || this.newEntities.has(managed.entity)) {
+      this.newEntities.add(managed.entity);
+    }
+
+    for (const relation of managed.metadata.relations) {
+      if (!hasCascade(relation, CascadeType.PERSIST)) {
+        continue;
+      }
+
+      const relatedEntities = await readCascadeRelationEntities(managed.entity, relation);
+
+      if (relatedEntities.length === 0) {
+        continue;
+      }
+
+      const adapter = adapterForRelation(managed.adapter, relation, CascadeType.PERSIST);
+
+      for (const related of relatedEntities) {
+        if (relation.kind === RelationKind.ONE_TO_MANY && relation.mappedBy) {
+          writeRawValue(related, relation.mappedBy, managed.entity);
+        }
+
+        await this.persistCascade(related, {
+          adapter,
+          entity: relation.target(),
+        }, seen);
+      }
+    }
+
+    return managedEntity;
+  }
+
+  private async removeCascade<TEntity extends object>(
+    entity: TEntity,
+    options: NPAManageEntityOptions<TEntity>,
+    seen: Set<object>,
+  ): Promise<void> {
+    if (seen.has(entity)) {
+      return;
+    }
+
+    seen.add(entity);
+
+    const managedEntity = this.manage(entity, options);
+    const managed = this.managed.get(managedEntity);
+
+    if (!managed) {
+      return;
+    }
+
+    await this.removeCascadeRelations(
+      managed,
+      [RelationKind.ONE_TO_MANY, RelationKind.MANY_TO_MANY],
+      seen,
+    );
+
+    if (this.newEntities.delete(managed.entity)) {
+      this.detachManagedEntity(managed.entity);
+      return;
+    }
+
+    this.removedEntities.add(managed.entity);
+    await this.removeCascadeRelations(
+      managed,
+      [RelationKind.MANY_TO_ONE],
+      seen,
+    );
+  }
+
+  private async removeCascadeRelations(
+    managed: ManagedEntity,
+    kinds: RelationKind[],
+    seen: Set<object>,
+  ): Promise<void> {
+    for (const relation of managed.metadata.relations) {
+      const shouldCascadeRemove = hasCascade(relation, CascadeType.REMOVE) ||
+        (relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval);
+
+      if (!kinds.includes(relation.kind) || !shouldCascadeRemove) {
+        continue;
+      }
+
+      const relatedEntities = await readCascadeRelationEntities(managed.entity, relation);
+
+      if (relatedEntities.length === 0) {
+        continue;
+      }
+
+      const adapter = adapterForRelation(managed.adapter, relation, CascadeType.REMOVE);
+
+      for (const related of relatedEntities) {
+        await this.removeCascade(related, {
+          adapter,
+          entity: relation.target(),
+        }, seen);
+      }
+    }
+  }
+
+  private async flushNewEntities(): Promise<void> {
+    const inserted: ManagedEntity[] = [];
+
+    while (this.newEntities.size > 0) {
+      let flushed = false;
+
+      for (const entity of [...this.newEntities]) {
+        const managed = this.managed.get(entity);
+
+        if (!managed) {
+          this.newEntities.delete(entity);
+          continue;
+        }
+
+        if (this.removedEntities.has(entity)) {
+          this.newEntities.delete(entity);
+          continue;
+        }
+
+        if (!canInsertNow(managed, this.newEntities)) {
+          continue;
+        }
+
+        await this.insertManagedEntity(managed);
+        this.newEntities.delete(entity);
+        inserted.push(managed);
+        flushed = true;
+      }
+
+      if (!flushed) {
+        throw new Error("Cannot flush persisted entity graph with unresolved @ManyToOne dependencies.");
+      }
+    }
+
+    for (const managed of inserted) {
+      await this.flushOneToManyChanges(managed, { force: true });
+      await this.flushManyToManyChanges(managed, { force: true });
+      managed.snapshot = snapshotEntity(managed.entity, managed.metadata);
+    }
+  }
+
+  private async insertManagedEntity(managed: ManagedEntity): Promise<void> {
+    if (!managed.adapter.insertManaged) {
+      throw new Error(
+        `Entity "${managed.metadata.target.name}" cannot be persisted because its adapter does not support persist.`,
+      );
+    }
+
+    const inserted = await managed.adapter.insertManaged(managed.entity);
+    mergeDatabaseValues(managed.entity, inserted, managed.metadata);
+    installColumnAliases(managed.entity, managed.metadata);
+
+    const primaryColumn = requirePrimaryColumn(managed.metadata);
+    this.rememberIdentity(
+      managed.adapter,
+      managed.metadata.target,
+      readColumnValue(managed.entity, primaryColumn),
+      managed,
+    );
+  }
+
+  private async flushRemovedEntities(): Promise<void> {
+    for (const entity of [...this.removedEntities]) {
+      const managed = this.managed.get(entity);
+
+      if (!managed) {
+        this.removedEntities.delete(entity);
+        continue;
+      }
+
+      if (!managed.adapter.deleteManaged) {
+        throw new Error(
+          `Entity "${managed.metadata.target.name}" cannot be removed because its adapter does not support remove.`,
+        );
+      }
+
+      const primaryColumn = requirePrimaryColumn(managed.metadata);
+      const id = readColumnValue(managed.entity, primaryColumn);
+
+      if (id === null || id === undefined) {
+        throw new Error(
+          `Cannot remove entity "${managed.metadata.target.name}" without a primary key value.`,
+        );
+      }
+
+      await this.deleteManyToManyRelations(managed, id);
+      await managed.adapter.deleteManaged(managed.entity, id);
+      this.removedEntities.delete(entity);
+      this.detachManagedEntity(entity);
+    }
+  }
+
+  private async flushManyToManyChanges(
+    managed: ManagedEntity,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
+    const primaryColumn = requirePrimaryColumn(managed.metadata);
+    const id = readColumnValue(managed.entity, primaryColumn);
+
+    if (id === null || id === undefined) {
+      throw new Error(
+        `Cannot flush many-to-many relations for "${managed.metadata.target.name}" without a primary key value.`,
+      );
+    }
+
+    for (const relation of managed.metadata.relations) {
+      if (relation.kind !== RelationKind.MANY_TO_MANY) {
+        continue;
+      }
+
+      const targetIds = readManyToManyRelationIds(managed.entity, relation);
+
+      if (!targetIds) {
+        continue;
+      }
+
+      const previousIds = managed.snapshot.get(relation.propertyName);
+
+      if (!options.force && isSameIdSet(targetIds, previousIds)) {
+        continue;
+      }
+
+      if (!managed.adapter.syncManyToManyRelations) {
+        throw new Error(
+          `Entity "${managed.metadata.target.name}" cannot flush relation "${relation.propertyName}" because its adapter does not support many-to-many sync.`,
+        );
+      }
+
+      await managed.adapter.syncManyToManyRelations(
+        managed.entity,
+        id,
+        relation,
+        targetIds,
+      );
+    }
+  }
+
+  private async flushOneToManyChanges(
+    managed: ManagedEntity,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
+    const primaryColumn = requirePrimaryColumn(managed.metadata);
+    const id = readColumnValue(managed.entity, primaryColumn);
+
+    if (id === null || id === undefined) {
+      throw new Error(
+        `Cannot flush one-to-many relations for "${managed.metadata.target.name}" without a primary key value.`,
+      );
+    }
+
+    for (const relation of managed.metadata.relations) {
+      if (relation.kind !== RelationKind.ONE_TO_MANY) {
+        continue;
+      }
+
+      const currentIds = readToManyRelationIds(managed.entity, relation);
+
+      if (!currentIds) {
+        continue;
+      }
+
+      const previousSnapshot = managed.snapshot.get(relation.propertyName);
+      const previousIds = toManySnapshotIds(previousSnapshot);
+
+      if (!options.force && isSameIdSet(currentIds, previousIds)) {
+        continue;
+      }
+
+      const targetRelation = findMappedByManyToOneRelation(managed.metadata, relation);
+      const targetAdapter = adapterForRelation(managed.adapter, relation, CascadeType.PERSIST);
+      const currentSet = new Set(currentIds);
+      const previousSet = previousIds ?? [];
+
+      for (const targetId of currentIds) {
+        if (!options.force && previousSet.some((value) => Object.is(value, targetId))) {
+          continue;
+        }
+
+        await targetAdapter.updateDirty(
+          {} as object,
+          targetId,
+          { [targetRelation.propertyName]: managed.entity },
+        );
+      }
+
+      for (const targetId of previousSet) {
+        if (currentSet.has(targetId)) {
+          continue;
+        }
+
+        if (relation.orphanRemoval) {
+          await this.removeCascade(
+            readSnapshotEntity(previousSnapshot, targetId, relation),
+            {
+              adapter: targetAdapter,
+              entity: relation.target(),
+            },
+            new Set(),
+          );
+          continue;
+        }
+
+        await targetAdapter.updateDirty(
+          {} as object,
+          targetId,
+          { [targetRelation.propertyName]: null },
+        );
+      }
+    }
+  }
+
+  private async deleteManyToManyRelations(
+    managed: ManagedEntity,
+    id: unknown,
+  ): Promise<void> {
+    for (const relation of managed.metadata.relations) {
+      if (relation.kind !== RelationKind.MANY_TO_MANY) {
+        continue;
+      }
+
+      if (!managed.adapter.deleteManyToManyRelations) {
+        throw new Error(
+          `Entity "${managed.metadata.target.name}" cannot remove relation "${relation.propertyName}" because its adapter does not support many-to-many cleanup.`,
+        );
+      }
+
+      await managed.adapter.deleteManyToManyRelations(
+        managed.entity,
+        id,
+        relation,
+      );
+    }
+  }
+
+  private findExistingManaged<TEntity extends object>(
+    entity: TEntity,
+    options: NPAManageEntityOptions<TEntity>,
+  ): ManagedEntity | undefined {
+    const managed = this.managed.get(entity);
+
+    if (managed) {
+      return managed;
+    }
+
+    const metadata = getEntityMetadata(options.entity);
+    const primaryColumn = requirePrimaryColumn(metadata);
+    const id = readColumnValue(entity, primaryColumn);
+
+    return id === null || id === undefined
+      ? undefined
+      : this.findByIdentity(options.adapter, metadata.target, id);
   }
 
   private findByIdentity(
@@ -244,8 +661,108 @@ export class PersistenceContext {
     const primaryColumn = requirePrimaryColumn(managed.metadata);
     const id = readColumnValue(managed.entity, primaryColumn);
     this.identityMap.get(managed.adapter)?.get(managed.metadata.target)?.delete(id);
+    this.newEntities.delete(entity);
+    this.removedEntities.delete(entity);
     this.managed.delete(entity);
   }
+}
+
+function hasCascade(
+  relation: RelationMetadata,
+  cascade: CascadeType,
+): boolean {
+  return relation.cascade.includes(cascade);
+}
+
+function adapterForRelation<TEntity extends object>(
+  adapter: NPADirtyCheckAdapter,
+  relation: RelationMetadata,
+  cascade: CascadeType,
+): NPADirtyCheckAdapter<TEntity> {
+  const target = relation.target() as EntityTarget<TEntity>;
+  const relatedAdapter = adapter.forEntity?.(target);
+
+  if (!relatedAdapter) {
+    throw new Error(
+      `Cascade ${cascade} on relation "${relation.propertyName}" requires an adapter for ${target.name}.`,
+    );
+  }
+
+  return relatedAdapter;
+}
+
+async function readCascadeRelationEntities(
+  entity: object,
+  relation: RelationMetadata,
+): Promise<object[]> {
+  const property = readOwnProperty(entity, relation.propertyName);
+
+  if (!property.found) {
+    return [];
+  }
+
+  const value = isPromiseLike(property.value)
+    ? await property.value
+    : property.value;
+
+  if (isPromiseLike(property.value)) {
+    writeRawValue(entity, relation.propertyName, value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter(isObject);
+  }
+
+  return isObject(value) ? [value] : [];
+}
+
+function canInsertNow(
+  managed: ManagedEntity,
+  newEntities: Set<object>,
+): boolean {
+  for (const relation of managed.metadata.relations) {
+    if (relation.kind !== RelationKind.MANY_TO_ONE) {
+      continue;
+    }
+
+    const property = readOwnDataProperty(managed.entity, relation.propertyName);
+
+    if (!property.found || !isObject(property.value)) {
+      continue;
+    }
+
+    const related = property.value;
+
+    if (newEntities.has(related)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function hasLoadedManyToManyChanges(managed: ManagedEntity): boolean {
+  return managed.metadata.relations.some((relation) => {
+    if (relation.kind !== RelationKind.MANY_TO_MANY) {
+      return false;
+    }
+
+    const currentIds = readManyToManyRelationIds(managed.entity, relation);
+    return currentIds !== undefined &&
+      !isSameIdSet(currentIds, managed.snapshot.get(relation.propertyName));
+  });
+}
+
+function hasLoadedOneToManyChanges(managed: ManagedEntity): boolean {
+  return managed.metadata.relations.some((relation) => {
+    if (relation.kind !== RelationKind.ONE_TO_MANY) {
+      return false;
+    }
+
+    const currentIds = readToManyRelationIds(managed.entity, relation);
+    return currentIds !== undefined &&
+      !isSameIdSet(currentIds, managed.snapshot.get(relation.propertyName));
+  });
 }
 
 function diffEntity<TEntity extends object>(
@@ -304,7 +821,19 @@ function snapshotEntity(
       .filter((relation) => relation.kind === RelationKind.MANY_TO_ONE)
       .map((relation) => [
         relation.propertyName,
-        snapshotValue(readRelationForeignKey(entity, relation)),
+        snapshotValue(readRelationForeignKeyForSnapshot(entity, relation)),
+      ] as const),
+    ...metadata.relations
+      .filter((relation) => relation.kind === RelationKind.ONE_TO_MANY)
+      .map((relation) => [
+        relation.propertyName,
+        readToManyRelationSnapshotForSnapshot(entity, relation),
+      ] as const),
+    ...metadata.relations
+      .filter((relation) => relation.kind === RelationKind.MANY_TO_MANY)
+      .map((relation) => [
+        relation.propertyName,
+        readManyToManyRelationIdsForSnapshot(entity, relation),
       ] as const),
   ]);
 }
@@ -382,6 +911,191 @@ function readRelationForeignKey(
   return readPropertyValue(entity, relationJoinColumnName(relation));
 }
 
+function readRelationForeignKeyForSnapshot(
+  entity: object,
+  relation: RelationMetadata,
+): unknown {
+  try {
+    return readRelationForeignKey(entity, relation);
+  } catch {
+    return undefined;
+  }
+}
+
+function readManyToManyRelationIds(
+  entity: object,
+  relation: RelationMetadata,
+): unknown[] | undefined {
+  return readToManyRelationIds(entity, relation);
+}
+
+function readToManyRelationIds(
+  entity: object,
+  relation: RelationMetadata,
+): unknown[] | undefined {
+  return readToManyRelationSnapshot(entity, relation)?.ids;
+}
+
+function readToManyRelationSnapshot(
+  entity: object,
+  relation: RelationMetadata,
+): ToManySnapshot | undefined {
+  const property = readOwnDataProperty(entity, relation.propertyName);
+
+  if (!property.found || isPromiseLike(property.value)) {
+    return undefined;
+  }
+
+  if (!Array.isArray(property.value)) {
+    throw new Error(`To-many relation "${relation.propertyName}" must be an array.`);
+  }
+
+  const targetMetadata = getEntityMetadata(relation.target());
+  const entities = property.value.filter(isObject);
+
+  return {
+    ids: uniqueValues(
+      entities.map((target) =>
+        readRequiredRelationTargetId(target, targetMetadata, relation),
+      ),
+    ),
+    entities,
+  };
+}
+
+function readRequiredRelationTargetId(
+  target: object,
+  targetMetadata: EntityMetadata,
+  relation: RelationMetadata,
+): unknown {
+  const id = readEntityPrimaryValue(target, targetMetadata);
+
+  if (id === null || id === undefined) {
+    throw new Error(
+      `Relation "${relation.propertyName}" requires ${targetMetadata.target.name} id.`,
+    );
+  }
+
+  return id;
+}
+
+function readManyToManyRelationIdsForSnapshot(
+  entity: object,
+  relation: RelationMetadata,
+): unknown[] | undefined {
+  return readToManyRelationIdsForSnapshot(entity, relation);
+}
+
+function readToManyRelationIdsForSnapshot(
+  entity: object,
+  relation: RelationMetadata,
+): unknown[] | undefined {
+  try {
+    return readToManyRelationIds(entity, relation);
+  } catch {
+    return undefined;
+  }
+}
+
+function readToManyRelationSnapshotForSnapshot(
+  entity: object,
+  relation: RelationMetadata,
+): ToManySnapshot | undefined {
+  try {
+    return readToManyRelationSnapshot(entity, relation);
+  } catch {
+    return undefined;
+  }
+}
+
+function toManySnapshotIds(snapshot: unknown): unknown[] | undefined {
+  if (Array.isArray(snapshot)) {
+    return snapshot;
+  }
+
+  return isToManySnapshot(snapshot) ? snapshot.ids : undefined;
+}
+
+function readSnapshotEntity(
+  snapshot: unknown,
+  id: unknown,
+  relation: RelationMetadata,
+): object {
+  const targetMetadata = getEntityMetadata(relation.target());
+  const entity = isToManySnapshot(snapshot)
+    ? snapshot.entities.find((candidate) =>
+      Object.is(readEntityPrimaryValue(candidate, targetMetadata), id),
+    )
+    : undefined;
+
+  return entity ?? createEntityReference(targetMetadata, id);
+}
+
+function createEntityReference(
+  metadata: EntityMetadata,
+  id: unknown,
+): object {
+  const primaryColumn = requirePrimaryColumn(metadata);
+  return {
+    [primaryColumn.columnName]: id,
+    [primaryColumn.propertyName]: id,
+  };
+}
+
+function isToManySnapshot(value: unknown): value is ToManySnapshot {
+  return isObject(value) &&
+    Array.isArray((value as ToManySnapshot).ids) &&
+    Array.isArray((value as ToManySnapshot).entities);
+}
+
+function findMappedByManyToOneRelation(
+  source: EntityMetadata,
+  relation: RelationMetadata,
+): RelationMetadata {
+  if (!relation.mappedBy) {
+    throw new Error(`@OneToMany ${source.target.name}.${relation.propertyName} requires mappedBy.`);
+  }
+
+  const targetMetadata = getEntityMetadata(relation.target());
+  const targetRelation = targetMetadata.relations.find((candidate) =>
+    candidate.kind === RelationKind.MANY_TO_ONE &&
+    candidate.propertyName === relation.mappedBy,
+  );
+
+  if (!targetRelation) {
+    throw new Error(`@OneToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+  }
+
+  return targetRelation;
+}
+
+function isSameIdSet(
+  current: unknown[],
+  snapshot: unknown,
+): boolean {
+  const snapshotIds = toManySnapshotIds(snapshot);
+
+  if (!snapshotIds || current.length !== snapshotIds.length) {
+    return false;
+  }
+
+  return current.every((value) =>
+    snapshotIds.some((snapshotValue) => Object.is(value, snapshotValue)),
+  );
+}
+
+function uniqueValues(values: unknown[]): unknown[] {
+  const unique: unknown[] = [];
+
+  for (const value of values) {
+    if (!unique.some((current) => Object.is(current, value))) {
+      unique.push(value);
+    }
+  }
+
+  return unique;
+}
+
 function readOwnDataProperty(
   entity: object,
   propertyName: string,
@@ -393,6 +1107,28 @@ function readOwnDataProperty(
   }
 
   return { found: true, value: descriptor.value };
+}
+
+function readOwnProperty(
+  entity: object,
+  propertyName: string,
+): { found: true; value: unknown } | { found: false } {
+  if (!Object.prototype.hasOwnProperty.call(entity, propertyName)) {
+    return { found: false };
+  }
+
+  return {
+    found: true,
+    value: (entity as Record<string, unknown>)[propertyName],
+  };
+}
+
+function isObject(value: unknown): value is object {
+  return value !== null && typeof value === "object";
+}
+
+function isPromiseLike(value: unknown): value is Promise<unknown> {
+  return isObject(value) && typeof (value as { then?: unknown }).then === "function";
 }
 
 function readPropertyValue(entity: object, propertyName: string): unknown {

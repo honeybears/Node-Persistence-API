@@ -1,4 +1,4 @@
-import { ColumnMetadata, EntityTarget } from "../entity";
+import { ColumnMetadata, EntityTarget, RelationMetadata } from "../entity";
 
 export interface NPADirtyCheckUpdateOptions {
   expectedVersion?: unknown;
@@ -12,6 +12,27 @@ export interface NPADirtyCheckAdapter<TEntity extends object = object> {
     patch: Partial<TEntity>,
     options?: NPADirtyCheckUpdateOptions,
   ): Promise<TEntity | null> | TEntity | null;
+  insertManaged?(
+    entity: TEntity,
+  ): Promise<TEntity> | TEntity;
+  deleteManaged?(
+    entity: TEntity,
+    id: unknown,
+  ): Promise<number> | number;
+  syncManyToManyRelations?(
+    entity: TEntity,
+    id: unknown,
+    relation: RelationMetadata,
+    targetIds: unknown[],
+  ): Promise<void> | void;
+  deleteManyToManyRelations?(
+    entity: TEntity,
+    id: unknown,
+    relation: RelationMetadata,
+  ): Promise<void> | void;
+  forEntity?<TTarget extends object>(
+    entity: EntityTarget<TTarget>,
+  ): NPADirtyCheckAdapter<TTarget>;
 }
 
 export interface NPAManageEntityOptions<TEntity extends object = object> {

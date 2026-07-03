@@ -1,5 +1,14 @@
-import { EntityMetadata, RelationMetadata } from "./types";
+import {
+  CascadeType,
+  EntityMetadata,
+  RelationKind,
+  RelationMetadata,
+} from "./types";
 import { getEntityMetadata } from "./metadata-storage";
+
+export interface RelationLoadTree {
+  [propertyName: string]: true | RelationLoadTree;
+}
 
 export function relationJoinColumnName(relation: RelationMetadata): string {
   const targetMetadata = getEntityMetadata(relation.target());
@@ -96,6 +105,44 @@ export function joinTableColumnName(
   return primaryColumn.columnName.startsWith(prefix)
     ? primaryColumn.columnName
     : `${prefix}${primaryColumn.columnName}`;
+}
+
+export function needsOrmDelete(metadata: EntityMetadata): boolean {
+  return metadata.relations.some((relation) =>
+    relation.kind === RelationKind.MANY_TO_MANY ||
+    (relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval) ||
+    relation.cascade.includes(CascadeType.REMOVE),
+  );
+}
+
+export function removeCascadeRelationTree(
+  metadata: EntityMetadata,
+  seen = new Set<object>(),
+): RelationLoadTree | undefined {
+  if (seen.has(metadata.target)) {
+    return undefined;
+  }
+
+  seen.add(metadata.target);
+
+  const tree: RelationLoadTree = {};
+
+  for (const relation of metadata.relations) {
+    if (
+      !(relation.kind === RelationKind.ONE_TO_MANY && relation.orphanRemoval) &&
+      !relation.cascade.includes(CascadeType.REMOVE)
+    ) {
+      continue;
+    }
+
+    const targetTree = removeCascadeRelationTree(
+      getEntityMetadata(relation.target()),
+      new Set(seen),
+    );
+    tree[relation.propertyName] = targetTree ?? true;
+  }
+
+  return Object.keys(tree).length === 0 ? undefined : tree;
 }
 
 function toSnakeCase(value: string): string {

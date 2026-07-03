@@ -42,6 +42,7 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findAll(options?: NPALoadOptions<TEntity>): Promise<TEntity[]>;
   abstract existsById(id: TId): Promise<boolean>;
   abstract count(): Promise<number>;
+  abstract persist(entity: TEntity): Promise<TEntity>;
   abstract save(entity: TEntity): Promise<TEntity | null>;
   abstract insert(entity: TEntity): Promise<TEntity>;
   abstract update(entity: TEntity): Promise<TEntity | null>;
@@ -49,6 +50,7 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
     id: TId,
     patch: Partial<TEntity>,
   ): Promise<TEntity | null>;
+  abstract remove(entity: TEntity): Promise<void>;
   abstract delete(entityOrId: TEntity | TId): Promise<number>;
   abstract deleteById(id: TId): Promise<number>;
   abstract deleteAll(): Promise<number>;

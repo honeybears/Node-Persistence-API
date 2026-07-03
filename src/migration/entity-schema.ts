@@ -27,6 +27,7 @@ interface DecoratorOptions {
   foreignKeyName?: string;
   onDelete?: MigrationReferentialAction;
   onUpdate?: MigrationReferentialAction;
+  orphanRemoval?: boolean;
 }
 
 type FieldDecoratorName = "Id" | "Column" | "Version" | "CreatedAt" | "UpdatedAt";
@@ -422,6 +423,8 @@ function readRelationOptions(rawArguments: string, context: string): DecoratorOp
     "foreignKeyName",
     "onDelete",
     "onUpdate",
+    "cascade",
+    "orphanRemoval",
   ]);
 }
 
@@ -484,12 +487,12 @@ function parseDecoratorOptions(
 
     const rawPropertyValue = entry.slice(separatorIndex + 1).trim();
 
-    if (key === "nullable") {
+    if (key === "nullable" || key === "orphanRemoval") {
       if (rawPropertyValue !== "true" && rawPropertyValue !== "false") {
         throw new Error(`${context}.${key} must be a boolean literal.`);
       }
 
-      options.nullable = rawPropertyValue === "true";
+      options[key] = rawPropertyValue === "true";
       continue;
     }
 
@@ -530,6 +533,10 @@ function parseDecoratorOptions(
         rawPropertyValue,
         `${context}.${key}`,
       );
+      continue;
+    }
+
+    if (key === "cascade") {
       continue;
     }
 
