@@ -1,3 +1,4 @@
+import { NPADatabaseError } from "@node-persistence-api/core";
 import {
   MysqlQueryable,
   MysqlRawQueryResult,
@@ -37,7 +38,9 @@ export class MysqlConnection implements MysqlQueryable {
       throw toMysqlDatabaseError(error);
     }
 
-    throw new Error("MySQL connection requires query() or execute().");
+    throw new NPADatabaseError("MySQL connection requires query() or execute().", {
+      code: "NPA_DATABASE_CONNECTION_INVALID",
+    });
   }
 
   async execute<TRow = Record<string, unknown>>(
@@ -56,7 +59,9 @@ export class MysqlConnection implements MysqlQueryable {
       throw toMysqlDatabaseError(error);
     }
 
-    throw new Error("MySQL connection requires query() or execute().");
+    throw new NPADatabaseError("MySQL connection requires query() or execute().", {
+      code: "NPA_DATABASE_CONNECTION_INVALID",
+    });
   }
 
   async close(): Promise<void> {

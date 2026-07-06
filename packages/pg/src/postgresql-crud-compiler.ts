@@ -1,3 +1,4 @@
+import { NPAPersistenceError } from "@node-persistence-api/core";
 import {
   PostgresqlCompiledQuery,
   PostgresqlQueryCompilerOptions,
@@ -26,7 +27,9 @@ export function compilePostgresqlInsert<TEntity extends object>(
   );
 
   if (entries.length === 0) {
-    throw new Error("Cannot insert an entity without values.");
+    throw new NPAPersistenceError("Cannot insert an entity without values.", {
+      code: "NPA_INSERT_VALUES_REQUIRED",
+    });
   }
 
   const columnValues = expandColumnValues(entries, options);
@@ -56,7 +59,9 @@ export function compilePostgresqlUpdate<TEntity extends object>(
   );
 
   if (entries.length === 0) {
-    throw new Error("Cannot update an entity without changed values.");
+    throw new NPAPersistenceError("Cannot update an entity without changed values.", {
+      code: "NPA_UPDATE_VALUES_REQUIRED",
+    });
   }
 
   const columnValues = expandColumnValues(entries, options);
@@ -90,7 +95,9 @@ export function compilePostgresqlVersionedUpdate<TEntity extends object>(
   );
 
   if (entries.length === 0) {
-    throw new Error("Cannot update an entity without changed values.");
+    throw new NPAPersistenceError("Cannot update an entity without changed values.", {
+      code: "NPA_UPDATE_VALUES_REQUIRED",
+    });
   }
 
   const columnValues = expandColumnValues(entries, options);
@@ -248,7 +255,9 @@ function requireVersionProperty(
   const version = resolveVersionProperty(options);
 
   if (!version) {
-    throw new Error("A @Version column is required for versioned updates.");
+    throw new NPAPersistenceError("A @Version column is required for versioned updates.", {
+      code: "NPA_VERSION_COLUMN_REQUIRED",
+    });
   }
 
   return version;
@@ -256,7 +265,9 @@ function requireVersionProperty(
 
 function assertVersion(version: unknown): void {
   if (version === null || version === undefined) {
-    throw new Error("Version value is required.");
+    throw new NPAPersistenceError("Version value is required.", {
+      code: "NPA_VERSION_VALUE_REQUIRED",
+    });
   }
 }
 
@@ -283,7 +294,9 @@ function primaryKeyValueEntries(
   }
 
   if (id === null || id === undefined || typeof id !== "object") {
-    throw new Error("Composite primary key value must be an object.");
+    throw new NPAPersistenceError("Composite primary key value must be an object.", {
+      code: "NPA_COMPOSITE_ID_OBJECT_REQUIRED",
+    });
   }
 
   const record = id as Record<string, unknown>;
@@ -310,6 +323,8 @@ function definedEntries<TEntity extends object>(
 
 function assertId(id: unknown): void {
   if (id === null || id === undefined) {
-    throw new Error("Primary key value is required.");
+    throw new NPAPersistenceError("Primary key value is required.", {
+      code: "NPA_PRIMARY_KEY_REQUIRED",
+    });
   }
 }

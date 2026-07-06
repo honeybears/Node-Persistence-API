@@ -13,6 +13,7 @@ import type {
 import {
   assertSafeMigrationStatements,
   createDownMigrationStatements,
+  NPADatabaseError,
   NPAMigrationError,
 } from "@node-persistence-api/core";
 import { MigrationRelationKind } from "@node-persistence-api/core";
@@ -525,7 +526,9 @@ function compilePostgresqlRenameStatements(
   for (const rename of renames) {
     if (rename.kind === "table") {
       if ((rename.from.schema ?? "public") !== (rename.to.schema ?? "public")) {
-        throw new Error("PostgreSQL table renames cannot move tables between schemas.");
+        throw new NPAMigrationError("PostgreSQL table renames cannot move tables between schemas.", {
+          code: "NPA_MIGRATION_INVALID_RENAME",
+        });
       }
 
       const fromKey = tableKey(rename.from);
@@ -851,8 +854,12 @@ function defaultType(
     return "TIMESTAMPTZ";
   }
 
-  throw new Error(
+  throw new NPAMigrationError(
     `Unsupported PostgreSQL migration type "${column.tsType}" for ${column.propertyName}. Use @Column({ type: "..." }).`,
+    {
+      code: "NPA_MIGRATION_UNSUPPORTED_DDL",
+      details: { propertyName: column.propertyName, tsType: column.tsType },
+    },
   );
 }
 
@@ -905,8 +912,12 @@ function entityTable(
     const target = byClassName.get(relation.targetClassName);
 
     if (!target) {
-      throw new Error(
+      throw new NPAMigrationError(
         `@${relation.kind === MigrationRelationKind.ONE_TO_ONE ? "OneToOne" : "ManyToOne"} for ${entity.className}.${relation.propertyName} targets unknown entity ${relation.targetClassName}.`,
+        {
+          code: "NPA_RELATION_NOT_FOUND",
+          details: { entity: entity.className, relation: relation.propertyName, target: relation.targetClassName },
+        },
       );
     }
 
@@ -965,8 +976,12 @@ function buildJoinTables(entities: MigrationEntitySchema[]): MigrationTableSchem
       const target = byClassName.get(relation.targetClassName);
 
       if (!target) {
-        throw new Error(
+        throw new NPAMigrationError(
           `@ManyToMany for ${entity.className}.${relation.propertyName} targets unknown entity ${relation.targetClassName}.`,
+          {
+            code: "NPA_RELATION_NOT_FOUND",
+            details: { entity: entity.className, relation: relation.propertyName, target: relation.targetClassName },
+          },
         );
       }
 
@@ -1084,7 +1099,10 @@ function primaryColumns(entity: MigrationEntitySchema): MigrationColumnSchema[] 
   const primary = entity.columns.filter((column) => column.primary);
 
   if (primary.length === 0) {
-    throw new Error(`${entity.className} must declare an @Id column before it can be migrated.`);
+    throw new NPAMigrationError(`${entity.className} must declare an @Id column before it can be migrated.`, {
+      code: "NPA_MIGRATION_ENTITY_ID_REQUIRED",
+      details: { entity: entity.className },
+    });
   }
 
   return primary;
@@ -1492,7 +1510,9 @@ function quoteQualifiedIdentifier(identifier: string): string {
 
 function quoteIdentifier(identifier: string): string {
   if (identifier.length === 0) {
-    throw new Error("PostgreSQL identifier must not be empty.");
+    throw new NPADatabaseError("PostgreSQL identifier must not be empty.", {
+      code: "NPA_DATABASE_IDENTIFIER_INVALID",
+    });
   }
 
   return `"${identifier.replace(/"/g, '""')}"`;

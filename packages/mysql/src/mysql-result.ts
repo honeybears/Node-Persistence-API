@@ -1,3 +1,4 @@
+import { NPADatabaseError } from "@node-persistence-api/core";
 import {
   MysqlOkPacket,
   MysqlQueryResult,
@@ -36,7 +37,9 @@ function callQueryable<TRow>(
     return options.queryable.execute<TRow>(text, values);
   }
 
-  throw new Error("MySQL queryable requires query() or execute().");
+  throw new NPADatabaseError("MySQL queryable requires query() or execute().", {
+    code: "NPA_DATABASE_CONNECTION_INVALID",
+  });
 }
 
 export function normalizeMysqlResult<TRow>(

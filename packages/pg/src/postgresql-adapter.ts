@@ -1,4 +1,4 @@
-import { createNPARepository } from "@node-persistence-api/core";
+import { createNPARepository, NPAConfigurationError } from "@node-persistence-api/core";
 import type {
   NPACreateRepositoryOptions,
   NPARepository,
@@ -27,7 +27,9 @@ export function postgresql(
   );
 
   if (!queryable) {
-    throw new Error("PostgreSQL adapter requires queryable or connection.");
+    throw new NPAConfigurationError("PostgreSQL adapter requires queryable or connection.", {
+      code: "NPA_ADAPTER_REQUIRED",
+    });
   }
 
   return {

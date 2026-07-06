@@ -13,8 +13,12 @@ import {
   joinTableColumnNames,
   needsOrmDelete,
   primaryColumnsOf,
+  NPADatabaseError,
   NPAFindOptions,
   NPAEntityGraphMetadata,
+  NPAMetadataError,
+  NPAPaginationError,
+  NPAQueryError,
   NPARepositoryAdapter,
   NPADirtyCheckAdapter,
   NPALoadOptions,
@@ -80,7 +84,10 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     }
 
     if (invocation.pageable && invocation.query.action !== "find") {
-      throw new Error(`Query method "${invocation.query.methodName}" only supports Pageable on find queries.`);
+      throw new NPAQueryError(`Query method "${invocation.query.methodName}" only supports Pageable on find queries.`, {
+        code: "NPA_PAGEABLE_UNSUPPORTED_QUERY",
+        details: { methodName: invocation.query.methodName },
+      });
     }
 
     if (invocation.pageable) {
@@ -250,7 +257,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     const inserted = result.rows[0];
 
     if (!inserted) {
-      throw new Error("PostgreSQL insert did not return a row.");
+      throw new NPADatabaseError("PostgreSQL insert did not return a row.", {
+        code: "NPA_DATABASE_INSERT_RETURN_FAILED",
+      });
     }
 
     return this.manage(this.attachLazy([inserted])[0]);
@@ -362,7 +371,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     const pageable = invocation.pageable;
 
     if (!pageable) {
-      throw new Error("Page query requires Pageable.");
+      throw new NPAPaginationError("Page query requires Pageable.", {
+        code: "NPA_CURSOR_METADATA_REQUIRED",
+      });
     }
 
     const query = compilePostgresqlQuery(invocation, this.options);
@@ -395,7 +406,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     }
 
     if (!isCursorPageable(pageable) || !query.cursor) {
-      throw new Error("Cursor page query requires cursor metadata.");
+      throw new NPAPaginationError("Cursor page query requires cursor metadata.", {
+        code: "NPA_CURSOR_METADATA_REQUIRED",
+      });
     }
 
     const window = createCursorWindow(result.rows, query.cursor);
@@ -426,7 +439,10 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
       case "execute":
         return affectedRows;
       default:
-        throw new Error(`Unsupported @Query result mode: ${query.result}`);
+        throw new NPAQueryError(`Unsupported @Query result mode: ${query.result}`, {
+          code: "NPA_RAW_QUERY_RESULT_MODE_UNSUPPORTED",
+          details: { result: query.result },
+        });
     }
   }
 
@@ -629,7 +645,9 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
         const inserted = result.rows[0];
 
         if (!inserted) {
-          throw new Error("PostgreSQL insert did not return a row.");
+          throw new NPADatabaseError("PostgreSQL insert did not return a row.", {
+            code: "NPA_DATABASE_INSERT_RETURN_FAILED",
+          });
         }
 
         return this.attachLazyFor([inserted], entity)[0];
@@ -728,7 +746,10 @@ function manyToManyJoin(
     );
 
     if (!owner) {
-      throw new Error(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+      throw new NPAMetadataError(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`, {
+        code: "NPA_RELATION_MAPPED_BY_NOT_FOUND",
+        details: { entity: source.target.name, relation: relation.propertyName, mappedBy: relation.mappedBy },
+      });
     }
 
     return {
@@ -821,7 +842,10 @@ function requireAdapterMetadata<TEntity extends object>(
   operation: string,
 ): EntityMetadata {
   if (!entity) {
-    throw new Error(`PostgreSQL ${operation} requires entity metadata.`);
+    throw new NPAMetadataError(`PostgreSQL ${operation} requires entity metadata.`, {
+      code: "NPA_REPOSITORY_METADATA_REQUIRED",
+      details: { operation },
+    });
   }
 
   return getEntityMetadata(entity);
@@ -861,7 +885,10 @@ function normalizeOrderDirection(direction: unknown): "asc" | "desc" {
     return direction;
   }
 
-  throw new Error(`Unsupported order direction "${String(direction)}".`);
+  throw new NPAQueryError(`Unsupported order direction "${String(direction)}".`, {
+    code: "NPA_ORDER_DIRECTION_UNSUPPORTED",
+    details: { direction },
+  });
 }
 
 function readExpectedVersionFromPatch(

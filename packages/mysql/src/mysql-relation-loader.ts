@@ -2,6 +2,8 @@ import {
   defaultJoinTableName,
   EntityMetadata,
   getEntityMetadata,
+  NPADatabaseError,
+  NPAMetadataError,
   NPALoadOptions,
   NPARelationLoadTree,
   primaryColumnsOf,
@@ -29,7 +31,9 @@ export async function loadMysqlRelations<TEntity extends object>(
   }
 
   if (!options.entity) {
-    throw new Error("MySQL relation loading requires entity metadata.");
+    throw new NPAMetadataError("MySQL relation loading requires entity metadata.", {
+      code: "NPA_RELATION_LOAD_METADATA_REQUIRED",
+    });
   }
 
   const metadata = getEntityMetadata(options.entity);
@@ -157,7 +161,10 @@ function findRelation(
     );
 
     if (!relation) {
-      throw new Error(`Entity ${metadata.target.name} has no relation ${propertyName}.`);
+      throw new NPAMetadataError(`Entity ${metadata.target.name} has no relation ${propertyName}.`, {
+        code: "NPA_RELATION_NOT_FOUND",
+        details: { entity: metadata.target.name, relation: propertyName },
+      });
     }
 
     return relation;
@@ -213,7 +220,10 @@ async function loadOneToOne<TEntity extends object>(
   options: MysqlRelationLoadOptions<TEntity>,
 ): Promise<object[]> {
   if (!relation.mappedBy) {
-    throw new Error(`@OneToOne ${metadata.target.name}.${relation.propertyName} requires mappedBy.`);
+    throw new NPAMetadataError(`@OneToOne ${metadata.target.name}.${relation.propertyName} requires mappedBy.`, {
+      code: "NPA_RELATION_MAPPED_BY_REQUIRED",
+      details: { entity: metadata.target.name, relation: relation.propertyName },
+    });
   }
 
   const targetMetadata = getEntityMetadata(relation.target());
@@ -246,7 +256,10 @@ async function loadOneToMany<TEntity extends object>(
   options: MysqlRelationLoadOptions<TEntity>,
 ): Promise<object[]> {
   if (!relation.mappedBy) {
-    throw new Error(`@OneToMany ${metadata.target.name}.${relation.propertyName} requires mappedBy.`);
+    throw new NPAMetadataError(`@OneToMany ${metadata.target.name}.${relation.propertyName} requires mappedBy.`, {
+      code: "NPA_RELATION_MAPPED_BY_REQUIRED",
+      details: { entity: metadata.target.name, relation: relation.propertyName },
+    });
   }
 
   const targetMetadata = getEntityMetadata(relation.target());
@@ -255,7 +268,10 @@ async function loadOneToMany<TEntity extends object>(
   );
 
   if (!targetRelation) {
-    throw new Error(`@OneToMany ${metadata.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+    throw new NPAMetadataError(`@OneToMany ${metadata.target.name}.${relation.propertyName} mappedBy relation was not found.`, {
+      code: "NPA_RELATION_MAPPED_BY_NOT_FOUND",
+      details: { entity: metadata.target.name, relation: relation.propertyName, mappedBy: relation.mappedBy },
+    });
   }
 
   const sourceIds = uniqueValues(entities.map((entity) => readPrimaryValueSet(entity, metadata)));
@@ -289,7 +305,10 @@ function findMappedOwningToOne(
   );
 
   if (!targetRelation) {
-    throw new Error(`@OneToOne ${sourceMetadata.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+    throw new NPAMetadataError(`@OneToOne ${sourceMetadata.target.name}.${relation.propertyName} mappedBy relation was not found.`, {
+      code: "NPA_RELATION_MAPPED_BY_NOT_FOUND",
+      details: { entity: sourceMetadata.target.name, relation: relation.propertyName, mappedBy: relation.mappedBy },
+    });
   }
 
   return targetRelation;
@@ -367,7 +386,10 @@ function manyToManyJoin(
     );
 
     if (!owner) {
-      throw new Error(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`);
+      throw new NPAMetadataError(`@ManyToMany ${source.target.name}.${relation.propertyName} mappedBy relation was not found.`, {
+        code: "NPA_RELATION_MAPPED_BY_NOT_FOUND",
+        details: { entity: source.target.name, relation: relation.propertyName, mappedBy: relation.mappedBy },
+      });
     }
 
     return {
@@ -462,7 +484,10 @@ function requirePrimaryColumns(metadata: EntityMetadata) {
   const primaryColumns = primaryColumnsOf(metadata);
 
   if (primaryColumns.length === 0) {
-    throw new Error(`Entity ${metadata.target.name} requires an @Id column.`);
+    throw new NPAMetadataError(`Entity ${metadata.target.name} requires an @Id column.`, {
+      code: "NPA_ENTITY_ID_REQUIRED",
+      details: { entity: metadata.target.name },
+    });
   }
 
   return primaryColumns;
@@ -474,7 +499,9 @@ function quoteQualifiedIdentifier(identifier: string): string {
 
 function quoteIdentifier(identifier: string): string {
   if (identifier.length === 0) {
-    throw new Error("MySQL identifier must not be empty.");
+    throw new NPADatabaseError("MySQL identifier must not be empty.", {
+      code: "NPA_DATABASE_IDENTIFIER_INVALID",
+    });
   }
 
   return `\`${identifier.replace(/`/g, "``")}\``;
