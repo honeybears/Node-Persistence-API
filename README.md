@@ -503,7 +503,7 @@ try {
   await npa.get(UserRepository).insert(user);
 } catch (error) {
   if (error instanceof NPADatabaseError) {
-    console.error(error.adapter, error.code, error.text, error.values);
+    console.error(error.code, error.details?.text, error.details?.values);
     throw error.cause;
   }
 
@@ -512,8 +512,9 @@ try {
 ```
 
 Driver failures are wrapped as `NPADatabaseError` with the original error in
-`cause`. Common fields such as `code`, `constraint`, `detail`, `errno`, and
-`sqlState` are copied when the driver exposes them.
+`cause`. SQL context and common driver fields such as `driverCode`,
+`constraint`, `detail`, `errno`, and `sqlState` are copied into `details` when
+available.
 
 
 ## Transactions

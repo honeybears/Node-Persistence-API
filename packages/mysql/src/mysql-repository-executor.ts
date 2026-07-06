@@ -234,9 +234,12 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
   save = async (entity: TEntity): Promise<TEntity | null> => {
     const id = getMysqlPrimaryKeyValue(entity, this.options);
-    return id === null || id === undefined
-      ? this.persistEntity(entity)
-      : this.updateEntity(entity);
+
+    if (id === null || id === undefined) {
+      return this.persistEntity(entity);
+    }
+
+    return (await this.updateEntity(entity)) ?? this.persistEntity(entity);
   };
 
   private persistEntity = async (entity: TEntity): Promise<TEntity> => {

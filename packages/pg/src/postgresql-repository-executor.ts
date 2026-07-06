@@ -221,9 +221,12 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     entity: TEntity,
   ): Promise<TEntity | null> => {
     const id = getPrimaryKeyValue(entity, this.options);
-    return id === null || id === undefined
-      ? this.persistEntity(entity)
-      : this.updateEntity(entity);
+
+    if (id === null || id === undefined) {
+      return this.persistEntity(entity);
+    }
+
+    return (await this.updateEntity(entity)) ?? this.persistEntity(entity);
   };
 
   private persistEntity = async (entity: TEntity): Promise<TEntity> => {

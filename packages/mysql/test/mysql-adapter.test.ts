@@ -886,14 +886,17 @@ describe("MySQL adapter", () => {
     const products = npa.get(ProductRepository) as ProductRepository & DynamicRepository;
 
     await expect(products.findById(10)).rejects.toMatchObject({
-      adapter: "mysql",
-      code: "ER_DUP_ENTRY",
-      errno: 1062,
+      code: "NPA_DATABASE_UNIQUE_CONSTRAINT_FAILED",
+      details: {
+        adapter: "mysql",
+        driverCode: "ER_DUP_ENTRY",
+        errno: 1062,
+        sqlState: "23000",
+        text:
+          "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
+        values: [10],
+      },
       name: "NPADatabaseError",
-      sqlState: "23000",
-      text:
-        "SELECT * FROM `shop`.`products` WHERE `product_id` = ? LIMIT 1",
-      values: [10],
     });
 
     const error = await products.findById(10).catch((caught) => caught);

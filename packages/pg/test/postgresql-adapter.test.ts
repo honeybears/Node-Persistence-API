@@ -848,7 +848,7 @@ describe("PostgreSQL adapter", () => {
     expect(slowQueries).toEqual(events);
   });
 
-  test("wraps PostgreSQL driver errors with SQL context", async () => {
+  test("wraps PostgreSQL driver errors and logs SQL context", async () => {
     const events = [];
     const driverError = Object.assign(new Error("duplicate key"), {
       code: "23505",
@@ -871,13 +871,12 @@ describe("PostgreSQL adapter", () => {
       DynamicRepository;
 
     await expect(products.findById(10)).rejects.toMatchObject({
-      adapter: "postgresql",
-      code: "23505",
-      constraint: "products_pkey",
-      detail: "Key already exists.",
+      code: "NPA_DATABASE_UNIQUE_CONSTRAINT_FAILED",
+      details: {
+        constraint: "products_pkey",
+        driverCode: "23505",
+      },
       name: "NPADatabaseError",
-      text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
-      values: [10],
     });
 
     const error = await products.findById(10).catch((caught) => caught);

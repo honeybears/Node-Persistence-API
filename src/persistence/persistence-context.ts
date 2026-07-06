@@ -122,6 +122,44 @@ export class PersistenceContext {
     return entities.map((entity) => this.manage(entity, options));
   }
 
+  refreshRelationSnapshot(entity: object, propertyName: string): void {
+    const managed = this.managed.get(entity);
+
+    if (!managed) {
+      return;
+    }
+
+    const relation = managed.metadata.relations.find((candidate) =>
+      candidate.propertyName === propertyName);
+
+    if (!relation) {
+      return;
+    }
+
+    if (isOwningToOneRelation(relation)) {
+      managed.snapshot.set(
+        relation.propertyName,
+        snapshotValue(readRelationForeignKeyForSnapshot(entity, relation)),
+      );
+      return;
+    }
+
+    if (relation.kind === RelationKind.ONE_TO_MANY) {
+      managed.snapshot.set(
+        relation.propertyName,
+        readToManyRelationSnapshotForSnapshot(entity, relation),
+      );
+      return;
+    }
+
+    if (relation.kind === RelationKind.MANY_TO_MANY) {
+      managed.snapshot.set(
+        relation.propertyName,
+        readManyToManyRelationIdsForSnapshot(entity, relation),
+      );
+    }
+  }
+
   detach(entity: object | null | undefined): void {
     if (entity) {
       this.detachManagedEntity(entity);

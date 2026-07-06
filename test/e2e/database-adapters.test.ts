@@ -68,14 +68,14 @@ describe("database adapter E2E", () => {
             queryable,
           }) as ProductRepository;
 
-          const inserted = await repository.insert({
+          const inserted = await repository.save({
             name: "logging desk",
             price: 120,
             active: true,
             status: "draft",
             createdAt: new Date("2026-01-01T00:00:00.000Z"),
           });
-          await repository.findById(inserted.product_id);
+          await repository.findById(inserted.id);
 
           expect(events.length).toBeGreaterThanOrEqual(2);
           expect(events).toEqual(slowQueries);
@@ -247,11 +247,11 @@ describe("database adapter E2E", () => {
           const lee = await users.save({ name: "lee" });
           const kimProfile = await profiles.save({
             bio: "builder",
-            user: { id: kim.user_id },
+            user: { id: kim.id },
           });
           await profiles.save({
             bio: "designer",
-            user: { id: lee.user_id },
+            user: { id: lee.id },
           });
 
           expect((await users.findByProfileBio("builder")).map((row) => row.name)).toEqual(["kim"]);
@@ -264,11 +264,11 @@ describe("database adapter E2E", () => {
           const loadedProfileUser = await (loadedProfile?.user as Promise<Row>);
           expect(loadedProfileUser.name).toEqual("kim");
 
-          const loadedUser = await users.findById(kim.user_id);
+          const loadedUser = await users.findById(kim.id);
           const loadedUserProfile = await (loadedUser?.profile as Promise<Row>);
           expect(loadedUserProfile.bio).toEqual("builder");
 
-          const lazyUser = await users.findById(lee.user_id);
+          const lazyUser = await users.findById(lee.id);
           const lazyProfileFromUser = await (lazyUser?.profile as Promise<Row>);
           expect(lazyProfileFromUser.bio).toEqual("designer");
 
@@ -392,8 +392,9 @@ describe("database adapter E2E", () => {
             expect(await repository.count()).toEqual(4);
 
             const [created] = await repository.findAll();
-            await service.renameManagedProduct(created.product_id, "dirty commit");
-            const renamed = await repository.findById(created.product_id);
+            const createdId = entityId(created, "product_id");
+            await service.renameManagedProduct(createdId, "dirty commit");
+            const renamed = await repository.findById(createdId);
             expect(renamed.product_name).toEqual("dirty commit");
             expect(renamed.version).toEqual(1);
           } finally {
@@ -702,10 +703,6 @@ async function assertTransactionIsolation(
 ) {
   const probe = transactionIsolationProbe(adapter);
   const writer = await adapter.createQueryable(container);
-  const writerRepository = adapter.createRepository({
-    entity: createProductEntity(tableName),
-    queryable: writer,
-  });
   let beforeCount;
   let afterCount;
   let transactionIsolation;
@@ -719,9 +716,7 @@ async function assertTransactionIsolation(
             runtime.queryable,
           );
         }
-        await writerRepository.save(
-          product("isolation probe", 5, "isolation-probe"),
-        );
+        await insertIsolationProbe(adapter, writer, tableName);
         afterCount = await repository.countByStatus("isolation-probe");
       },
       { isolation: probe.isolation },
@@ -733,9 +728,28 @@ async function assertTransactionIsolation(
       expect(normalizeIsolation(transactionIsolation)).toEqual(probe.expectedIsolation);
     }
   } finally {
-    await writerRepository.deleteByStatus("isolation-probe").catch(() => {});
+    await deleteIsolationProbe(adapter, writer, tableName).catch(() => {});
     await adapter.closeQueryable(writer);
   }
+}
+
+async function insertIsolationProbe(adapter, writer, tableName) {
+  const table = adapter.quoteIdentifier(tableName);
+  await adapter.executeSql(
+    writer,
+    [
+      `INSERT INTO ${table}`,
+      "(product_name, price, active, status, created_at, version)",
+      "VALUES ('isolation probe', 5, TRUE, 'isolation-probe', CURRENT_TIMESTAMP, 0)",
+    ].join(" "),
+  );
+}
+
+async function deleteIsolationProbe(adapter, writer, tableName) {
+  await adapter.executeSql(
+    writer,
+    `DELETE FROM ${adapter.quoteIdentifier(tableName)} WHERE status = 'isolation-probe'`,
+  );
 }
 
 function transactionIsolationProbe(adapter) {

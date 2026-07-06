@@ -2,6 +2,7 @@ import {
   defaultJoinTableName,
   EntityMetadata,
   getEntityMetadata,
+  getCurrentPersistenceContext,
   NPAMetadataError,
   NPALoadOptions,
   NPARelationLoadTree,
@@ -99,7 +100,13 @@ export function attachPostgresqlLazyRelations<TEntity extends object>(
             entity: options.entity,
             load: { relations: [relation.propertyName] },
             queryable: options.queryable,
-          }).then(() => readValue(entity, relation.propertyName));
+          }).then(() => {
+            getCurrentPersistenceContext()?.refreshRelationSnapshot(
+              entity,
+              relation.propertyName,
+            );
+            return readValue(entity, relation.propertyName);
+          });
 
           return cached;
         },
@@ -190,11 +197,15 @@ async function loadManyToOne<TEntity extends object>(
     return [];
   }
 
-  const rows = await selectRowsByColumn(
+  const rows = attachLazyTargets(
+    await selectRowsByColumn(
+      queryable,
+      targetMetadata,
+      joinColumns.map((column) => column.column.columnName),
+      ids,
+    ),
+    relation,
     queryable,
-    targetMetadata,
-    joinColumns.map((column) => column.column.columnName),
-    ids,
   );
   const rowById = new Map(rows.map((row) => [
     keyForValueSet(readColumnValueSet(row, joinColumns.map((column) => column.column.columnName))),
@@ -226,11 +237,15 @@ async function loadOneToOne<TEntity extends object>(
   const targetRelation = findMappedOwningToOne(metadata, targetMetadata, relation);
   const sourceIds = uniqueValues(entities.map((entity) => readPrimaryValueSet(entity, metadata)));
   const joinColumns = relationJoinColumns(targetRelation);
-  const rows = await selectRowsByColumn(
+  const rows = attachLazyTargets(
+    await selectRowsByColumn(
+      queryable,
+      targetMetadata,
+      joinColumns.map((column) => column.joinColumnName),
+      sourceIds,
+    ),
+    relation,
     queryable,
-    targetMetadata,
-    joinColumns.map((column) => column.joinColumnName),
-    sourceIds,
   );
   const rowsBySourceId = groupRows(
     rows,
@@ -272,11 +287,15 @@ async function loadOneToMany<TEntity extends object>(
 
   const sourceIds = uniqueValues(entities.map((entity) => readPrimaryValueSet(entity, metadata)));
   const joinColumns = relationJoinColumns(targetRelation);
-  const rows = await selectRowsByColumn(
+  const rows = attachLazyTargets(
+    await selectRowsByColumn(
+      queryable,
+      targetMetadata,
+      joinColumns.map((column) => column.joinColumnName),
+      sourceIds,
+    ),
+    relation,
     queryable,
-    targetMetadata,
-    joinColumns.map((column) => column.joinColumnName),
-    sourceIds,
   );
   const rowsBySourceId = groupRows(
     rows,
@@ -289,6 +308,17 @@ async function loadOneToMany<TEntity extends object>(
   }
 
   return flattenRelationValues(entities, relation);
+}
+
+function attachLazyTargets(
+  rows: Record<string, unknown>[],
+  relation: RelationMetadata,
+  queryable: PostgresqlQueryable,
+): Record<string, unknown>[] {
+  return attachPostgresqlLazyRelations(rows, {
+    entity: relation.target() as new (...args: any[]) => Record<string, unknown>,
+    queryable,
+  });
 }
 
 function findMappedOwningToOne(
@@ -353,6 +383,9 @@ async function loadManyToMany<TEntity extends object>(
     sourceAliases,
     { omitGroupColumns: true },
   );
+  for (const rows of rowsBySourceId.values()) {
+    attachLazyTargets(rows, relation, queryable);
+  }
 
   for (const entity of entities) {
     const id = readPrimaryValueSet(entity, metadata);

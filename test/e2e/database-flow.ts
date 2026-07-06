@@ -151,21 +151,27 @@ async function assertRepositoryContract(
     status: "draft",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   });
-  const firstId = first.product_id;
+  const firstId = first.id;
 
   expect(typeof firstId).toEqual("number");
-  expect(first.product_name).toEqual("desk alpha");
+  expect(first.name).toEqual("desk alpha");
   expect(first.price).toEqual(120);
   expect(first.version).toEqual(0);
   expect(await repository.existsById(firstId)).toEqual(true);
   expect(await repository.existsById(firstId + 1000)).toEqual(false);
-  expect(await repository.findById(firstId)).toEqual(first);
+  expect(await repository.findById(firstId)).toEqual(expect.objectContaining({
+    product_id: firstId,
+    product_name: "desk alpha",
+    price: 120,
+    status: "draft",
+    version: 0,
+  }));
   expect(await repository.findById(firstId + 1000)).toEqual(null);
   expect(await repository.findOneByName("missing product")).toEqual(null);
   expect(await repository.deleteByStatus("missing")).toEqual(0);
 
   const updated = await repository.save({
-    product_id: firstId,
+    id: firstId,
     name: "desk beta",
     price: 150,
     active: true,
