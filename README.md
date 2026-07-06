@@ -127,12 +127,12 @@ Multiple `@Id` columns define a composite primary key for direct CRUD calls;
 pass an object id such as `{ tenantId, userId }` to `findById`, `updateById`,
 `existsById`, or `deleteById`. Composite ids are also supported for owning
 relation foreign keys and many-to-many join tables.
-`@ManyToOne` and owning `@OneToOne` create a nullable foreign-key column using
-`joinColumn` or the default `<property>_<targetIdColumn>` name. Owning
-`@OneToOne` also creates a unique index for that foreign key in migrations. Use
-`joinColumns` when a relation targets a composite id and needs explicit foreign
-key column names. Use `foreignKeyName`, `onDelete`, and `onUpdate` to control
-generated constraints.
+`@ManyToOne` and owning `@OneToOne` create nullable foreign-key columns by
+default using `joinColumn` or the default `<property>_<targetIdColumn>` name;
+set `nullable: false` to generate `NOT NULL`. Owning `@OneToOne` also creates a
+unique index for that foreign key in migrations. Use `joinColumns` when a
+relation targets a composite id and needs explicit foreign key column names. Use
+`foreignKeyName`, `onDelete`, and `onUpdate` to control generated constraints.
 Inverse `@OneToOne` and `@OneToMany` require `mappedBy`; `@ManyToMany` creates a
 join table. Use `cascade` with
 `[CascadeType.PERSIST]` or `CascadeType.REMOVE` for loaded or lazy relation

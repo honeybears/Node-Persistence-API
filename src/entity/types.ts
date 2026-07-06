@@ -39,6 +39,7 @@ export interface RelationOptions {
   joinColumn?: string;
   joinColumns?: string[];
   joinTable?: string;
+  nullable?: boolean;
   foreignKeyName?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;
@@ -94,6 +95,7 @@ export interface RelationMetadata {
   joinColumn?: string;
   joinColumns?: string[];
   joinTable?: string;
+  nullable: boolean;
   foreignKeyName?: string;
   onDelete?: ReferentialAction;
   onUpdate?: ReferentialAction;

@@ -60,6 +60,7 @@ describe("migration metadata", () => {
         joinColumn: "primary_category_id",
         joinColumns: undefined,
         joinTable: undefined,
+        nullable: undefined,
         foreignKeyName: "fk_products_primary_category",
         onDelete: "SET NULL",
         onUpdate: undefined,
@@ -72,6 +73,7 @@ describe("migration metadata", () => {
         joinColumn: undefined,
         joinColumns: undefined,
         joinTable: "product_categories",
+        nullable: undefined,
         foreignKeyName: undefined,
         onDelete: undefined,
         onUpdate: undefined,
@@ -446,6 +448,7 @@ describe("migration metadata", () => {
         joinColumn: "user_id",
         joinColumns: undefined,
         joinTable: undefined,
+        nullable: undefined,
         foreignKeyName: "fk_profiles_user",
         onDelete: undefined,
         onUpdate: undefined,
@@ -506,6 +509,47 @@ describe("migration metadata", () => {
     );
     expect(compileMysqlMigrationStatements({ entities: schemas })).toContain(
       "ALTER TABLE `tenant_members` ADD CONSTRAINT `fk_tenant_members_team_tenant_id_team_team_id_tenant_teams` FOREIGN KEY (`team_tenant_id`, `team_team_id`) REFERENCES `tenant_teams` (`tenant_id`, `team_id`)",
+    );
+  });
+
+  test("creates non-nullable owning relation foreign keys", () => {
+    const schemas = parseEntitySource(`
+      import { Entity, Id, ManyToOne } from "@npa/test";
+
+      @Entity({ name: "users" })
+      class User {
+        @Id({ name: "user_id" })
+        id!: number;
+      }
+
+      @Entity({ name: "posts" })
+      class Post {
+        @Id({ name: "post_id" })
+        id!: number;
+
+        @ManyToOne(() => User, { joinColumn: "user_id", nullable: false })
+        user!: User;
+      }
+    `);
+
+    expect(schemas.find((schema) => schema.className === "Post")?.relations[0]).toMatchObject({
+      nullable: false,
+    });
+    expect(compilePostgresqlMigrationStatements({ entities: schemas })).toContain(
+      [
+        'CREATE TABLE IF NOT EXISTS "posts" (',
+        '  "post_id" INTEGER PRIMARY KEY,',
+        '  "user_id" INTEGER NOT NULL',
+        ")",
+      ].join("\n"),
+    );
+    expect(compileMysqlMigrationStatements({ entities: schemas })).toContain(
+      [
+        "CREATE TABLE IF NOT EXISTS `posts` (",
+        "  `post_id` INT PRIMARY KEY,",
+        "  `user_id` INT NOT NULL",
+        ")",
+      ].join("\n"),
     );
   });
 

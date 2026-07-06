@@ -901,7 +901,7 @@ function entityTable(
     for (const [index, joinColumn] of joinColumns.entries()) {
       const column = {
         ...relationColumn(targetPrimaryColumns[index], joinColumn),
-        nullable: true,
+        nullable: relation.nullable ?? true,
       };
       columns.set(joinColumn, column);
     }

@@ -172,6 +172,7 @@ export function registerRelation(
     joinColumn: options.joinColumn,
     joinColumns: options.joinColumns,
     joinTable: options.joinTable,
+    nullable: options.nullable ?? true,
     foreignKeyName: options.foreignKeyName,
     onDelete: options.onDelete,
     onUpdate: options.onUpdate,
