@@ -111,6 +111,7 @@ export interface LoadMigrationConfigOptions {
   adapter?: string;
   url?: string;
   entities?: string[];
+  migrationsDir?: string;
 }
 
 export interface MigrationRunOptions {

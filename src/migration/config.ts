@@ -27,7 +27,7 @@ export async function loadMigrationConfig(
     url,
     entities: options.entities ?? normalizeEntities(config.entities),
     migrations: {
-      dir: config.migrations?.dir ?? DEFAULT_MIGRATIONS_DIR,
+      dir: options.migrationsDir ?? config.migrations?.dir ?? DEFAULT_MIGRATIONS_DIR,
       table: config.migrations?.table ?? DEFAULT_MIGRATIONS_TABLE,
     },
   };

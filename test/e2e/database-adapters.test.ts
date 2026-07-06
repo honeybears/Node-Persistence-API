@@ -260,15 +260,13 @@ describe("database adapter E2E", () => {
               .map((row) => row.name)).toEqual(["kim"]);
           expect((await profiles.findByUserName("lee")).map((row) => row.bio)).toEqual(["designer"]);
 
-          const loadedProfile = await profiles.findById(kimProfile.profile_id, {
-            relations: { user: true },
-          });
-          expect((loadedProfile?.user as Row).name).toEqual("kim");
+          const loadedProfile = await profiles.findById(kimProfile.profile_id);
+          const loadedProfileUser = await (loadedProfile?.user as Promise<Row>);
+          expect(loadedProfileUser.name).toEqual("kim");
 
-          const loadedUser = await users.findById(kim.user_id, {
-            relations: { profile: true },
-          });
-          expect((loadedUser?.profile as Row).bio).toEqual("builder");
+          const loadedUser = await users.findById(kim.user_id);
+          const loadedUserProfile = await (loadedUser?.profile as Promise<Row>);
+          expect(loadedUserProfile.bio).toEqual("builder");
 
           const lazyUser = await users.findById(lee.user_id);
           const lazyProfileFromUser = await (lazyUser?.profile as Promise<Row>);
@@ -466,15 +464,14 @@ describe("database adapter E2E", () => {
           expect(await tableCount(adapter, queryable, memberRoleTableName)).toEqual(2);
 
           await runtime.manager.transactional(async () => {
-            const managedTeam = await teams.findById(teamId, {
-              relations: { members: { roles: true } },
-            });
+            const managedTeam = await teams.findById(teamId);
 
             if (!managedTeam) {
               throw new Error("Managed team was not found.");
             }
 
-            managedTeam.members = (managedTeam.members as Row[])
+            const loadedMembers = await (managedTeam.members as Promise<Row[]>);
+            managedTeam.members = loadedMembers
               .filter((member) => member.name !== "lee");
           });
 

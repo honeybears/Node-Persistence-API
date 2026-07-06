@@ -696,12 +696,13 @@ describe("migration metadata", () => {
         adapter: "mysql",
         url: "mysql://localhost/db",
         entities: ["src/**/*.entity.ts"],
+        migrationsDir: "custom/path",
       }),
     ).toEqual({
       adapter: "mysql",
       url: "mysql://localhost/db",
       entities: ["src/**/*.entity.ts"],
-      migrations: { dir: "database/migrations", table: "custom_migrations" },
+      migrations: { dir: "custom/path", table: "custom_migrations" },
     });
   });
 

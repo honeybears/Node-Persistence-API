@@ -14,7 +14,6 @@ import {
   mysqlPrimaryKeyProperty,
   normalizeMysqlPropertyValue,
   normalizeMysqlPropertyValues,
-  quoteMysqlIdentifier,
 } from "./mysql-identifiers";
 import { MysqlRelationQueryBuilder } from "./mysql-relation-query";
 import { MysqlCompiledQuery, MysqlQueryCompilerOptions } from "./types";
@@ -38,11 +37,8 @@ class MysqlQueryCompiler {
 
   compile(): MysqlCompiledQuery {
     const { query } = this.invocation;
-    if (this.invocation.select && this.invocation.select.length === 0) {
-      throw new Error("Select projection requires at least one property.");
-    }
 
-    this.relationQuery.prepare(query, this.invocation.select ?? []);
+    this.relationQuery.prepare(query);
     const page = this.compilePage(query);
     const from = this.relationQuery.selectFrom();
 
@@ -271,29 +267,6 @@ class MysqlQueryCompiler {
         order.property,
         `__cursor_${index}`,
       );
-      const selected = this.invocation.select ?? [];
-
-      if (selected.length > 0 && !cursorOrder.hidden) {
-        if (selected.includes(order.property)) {
-          return {
-            property: order.property,
-            direction: order.direction,
-            ...cursorOrder,
-            resultKey: order.property,
-          };
-        }
-
-        const resultKey = `__cursor_${index}`;
-        return {
-          property: order.property,
-          direction: order.direction,
-          ...cursorOrder,
-          resultKey,
-          hidden: true,
-          select: `${cursorOrder.expression} AS ${quoteMysqlIdentifier(resultKey)}`,
-        };
-      }
-
       return {
         property: order.property,
         direction: order.direction,
@@ -338,13 +311,6 @@ class MysqlQueryCompiler {
   }
 
   private selectTarget(query: ParsedQueryMethod): string {
-    if (this.invocation.select?.length) {
-      const projection = this.invocation.select.map((property) =>
-        `${this.column(property)} AS ${quoteMysqlIdentifier(property)}`,
-      ).join(", ");
-      return query.distinct === true ? `DISTINCT ${projection}` : projection;
-    }
-
     const target = this.relationQuery.selectTarget();
     return query.distinct === true ? `DISTINCT ${target}` : target;
   }

@@ -16,11 +16,7 @@ import { RepositoryMethodInvocation } from "./types";
 export class InMemoryRepositoryExecutor<TEntity extends object> {
   constructor(private readonly rows: TEntity[]) {}
 
-  execute = ({ query, args, pageable, select }: RepositoryMethodInvocation): unknown => {
-    if (select && select.length === 0) {
-      throw new Error("Select projection requires at least one property.");
-    }
-
+  execute = ({ query, args, pageable }: RepositoryMethodInvocation): unknown => {
     const matchedRows = this.rows.filter((row) =>
       matchesPredicate(row, query.predicate, args, query.allIgnoreCase === true),
     );
@@ -34,30 +30,23 @@ export class InMemoryRepositoryExecutor<TEntity extends object> {
     const selectedRows = pageable
       ? applyPageable(sortedRows, query.orderBy, pageable)
       : applyLimit(sortedRows, query.limit);
-    const projectedRows = select?.length
-      ? selectedRows.map((row) => projectRow(row, select))
-      : selectedRows;
 
     switch (query.action) {
       case "find":
         if (pageable && isOffsetPageable(pageable)) {
-          return createPage(projectedRows, pageable, resultRows.length);
+          return createPage(selectedRows, pageable, resultRows.length);
         }
 
         if (pageable && isCursorPageable(pageable)) {
-          const window = createCursorWindow(
+          return createCursorWindow(
             selectedRows,
             cursorMetadata(query.orderBy, pageable),
           );
-
-          return select?.length
-            ? { ...window, content: window.content.map((row) => projectRow(row, select)) }
-            : window;
         }
 
-        return projectedRows;
+        return selectedRows;
       case "findOne":
-        return projectedRows[0] ?? null;
+        return selectedRows[0] ?? null;
       case "exists":
         return matchedRows.length > 0;
       case "count":
@@ -342,16 +331,6 @@ function isAfterCursor<TEntity extends object>(
 
 function distinctRows<TEntity>(rows: TEntity[]): TEntity[] {
   return [...new Set(rows)];
-}
-
-function projectRow<TEntity extends object>(
-  row: TEntity,
-  select: readonly string[],
-): Partial<TEntity> {
-  const record = row as Record<string, unknown>;
-  return Object.fromEntries(
-    select.map((property) => [property, record[property]]),
-  ) as Partial<TEntity>;
 }
 
 function getProperty<TEntity extends object>(

@@ -3,10 +3,8 @@ import { getEntityGraphMetadata } from "./entity-graph-decorator";
 import {
   NPARepository,
   NPARepositoryAdapter,
-  NPABaseFindOptions,
   NPAFindOptions,
   NPALoadOptions,
-  NPARelationLoadTree,
 } from "./types";
 
 export function createNPARepository<
@@ -20,17 +18,14 @@ export function createNPARepository<
   const repository = Object.assign(
     Object.create(Object.getPrototypeOf(target) ?? Object.prototype),
     {
-      findById: (id: TId, options?: NPALoadOptions<TEntity>) =>
+      findById: (id: TId) =>
         adapter.findById(
           id,
-          mergeLoadOptions(
-            toLoadOptions(getEntityGraphMetadata(target, "findById")),
-            options,
-          ),
+          toLoadOptions(getEntityGraphMetadata(target, "findById")),
         ),
       findAll: (options?: NPAFindOptions<TEntity>) =>
         adapter.findAll(
-          mergeLoadOptions(
+          mergeEntityGraphOptions(
             toLoadOptions(getEntityGraphMetadata(target, "findAll")),
             options,
           ),
@@ -71,53 +66,13 @@ function toLoadOptions<TEntity extends object>(
   return entityGraph ? { relations: entityGraph.relations } : undefined;
 }
 
-function mergeLoadOptions<TEntity extends object>(
+function mergeEntityGraphOptions<TEntity extends object>(
   left: NPALoadOptions<TEntity> | undefined,
   right: NPAFindOptions<TEntity> | undefined,
-): NPAFindOptions<TEntity> | undefined {
-  if (right?.select?.length && left?.relations) {
-    throw new Error("findAll select projections cannot be combined with relation loading.");
-  }
-
-  const loadRight = right as NPABaseFindOptions<TEntity> | undefined;
-
+): (NPAFindOptions<TEntity> & NPALoadOptions<TEntity>) | undefined {
   if (!left?.relations) {
     return right;
   }
 
-  if (!loadRight?.relations) {
-    return { ...loadRight, relations: left.relations };
-  }
-
-  const leftRelations = left.relations;
-  const rightRelations = loadRight.relations;
-
-  if (leftRelations === true || rightRelations === true) {
-    return { ...loadRight, relations: true };
-  }
-
-  if (Array.isArray(leftRelations) && Array.isArray(rightRelations)) {
-    return {
-      ...loadRight,
-      relations: [...new Set([...leftRelations, ...rightRelations])],
-    };
-  }
-
-  return {
-    ...loadRight,
-    relations: {
-      ...toRelationTree(leftRelations),
-      ...toRelationTree(rightRelations),
-    },
-  };
-}
-
-function toRelationTree(
-  relations: ReadonlyArray<string> | NPARelationLoadTree,
-): NPARelationLoadTree {
-  if (Array.isArray(relations)) {
-    return Object.fromEntries(relations.map((relation) => [relation, true]));
-  }
-
-  return relations;
+  return { ...right, relations: left.relations };
 }

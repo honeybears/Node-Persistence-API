@@ -160,6 +160,16 @@ abstract class MemberGraphRepository extends NPARepository<Member, number> {
   abstract findByName: (name: string) => Promise<Loaded<Member, typeof memberGraph>[]>;
 }
 
+abstract class MemberByIdGraphRepository extends NPARepository<Member, number> {
+  @EntityGraph(memberGraph)
+  abstract findById: (id: number) => Promise<Loaded<Member, typeof memberGraph> | null>;
+}
+
+abstract class TeamMembersGraphRepository extends NPARepository<Team, number> {
+  @EntityGraph(["members"])
+  abstract findAll: () => Promise<Array<Loaded<Team, ["members"]>>>;
+}
+
 @Entity({ name: "broken_teams" })
 class BrokenTeam {
   @Id({ name: "team_id" })
@@ -323,38 +333,6 @@ describe("MySQL adapter", () => {
         cursor: expect.any(Object),
       });
 
-    expect(compileMysqlQuery(
-        {
-          query: parseQueryMethod("findByStatusOrderByCreatedAtDesc"),
-          args: ["active"],
-          select: ["name"],
-          pageable: Pageable.cursor({
-            after: cursorToken(["2026-01-01T00:00:00.000Z", 10]),
-            size: 2,
-          }),
-        },
-        { entity: Product },
-      )).toEqual({
-        text:
-          "SELECT `product_name` AS `name`, `created_at` AS `__cursor_0`, `product_id` AS `__cursor_1` FROM `shop`.`products` WHERE (`status` = ?) AND ((`created_at` < ?) OR (`created_at` = ? AND `product_id` > ?)) ORDER BY `created_at` DESC, `product_id` ASC LIMIT 3",
-        values: [
-          "active",
-          "2026-01-01T00:00:00.000Z",
-          "2026-01-01T00:00:00.000Z",
-          10,
-        ],
-        cursor: expect.any(Object),
-      });
-
-    expect(() =>
-      compileMysqlQuery(
-        {
-          query: parseQueryMethod("findByStatus"),
-          args: ["active"],
-          select: [],
-        },
-        { entity: Product },
-      )).toThrow(/Select projection requires at least one property/);
   });
 
   test("compiles MySQL null and empty-list derived query parameters", () => {
@@ -655,24 +633,6 @@ describe("MySQL adapter", () => {
       text: "SELECT * FROM `shop`.`products`",
       values: [],
     });
-    expect(compileMysqlQuery(
-        {
-          query: {
-            methodName: "findAll",
-            action: "find",
-            predicate: [],
-            orderBy: [{ property: "name", direction: "desc" }],
-            parameterCount: 0,
-          },
-          args: [],
-          select: ["id", "name"],
-        },
-        { entity: Product },
-      )).toEqual({
-        text:
-          "SELECT `product_id` AS `id`, `product_name` AS `name` FROM `shop`.`products` ORDER BY `product_name` DESC",
-        values: [],
-      });
     expect(compileMysqlCount({ entity: Product })).toEqual({
       text: "SELECT COUNT(*) AS `count` FROM `shop`.`products`",
       values: [],
@@ -1555,8 +1515,12 @@ describe("MySQL adapter", () => {
       {},
       { entity: Member, queryable: asMysqlQueryable(queryable) },
     );
+    const loadedMembers = createMysqlDerivedQueryRepository(
+      Object.create(MemberByIdGraphRepository.prototype),
+      { entity: Member, queryable: asMysqlQueryable(queryable) },
+    );
     const teams = createMysqlDerivedQueryRepository(
-      {},
+      Object.create(TeamMembersGraphRepository.prototype),
       { entity: Team, queryable: asMysqlQueryable(queryable) },
     );
 
@@ -1571,26 +1535,19 @@ describe("MySQL adapter", () => {
       { role_id: 8, name: "writer" },
     ]);
 
-    const member = await members.findById(10, {
-      relations: {
-        roles: true,
-        team: {
-          organization: true,
-        },
-      },
-    });
-    expect(member.team).toEqual({
+    const member = await loadedMembers.findById(10);
+    expect(member?.team).toEqual({
       organization: { organization_id: 3, name: "platform" },
       organization_id: 3,
       team_id: 2,
       label: "core",
     });
-    expect(member.roles).toEqual([
+    expect(member?.roles).toEqual([
       { role_id: 7, name: "admin" },
       { role_id: 8, name: "writer" },
     ]);
 
-    const [team] = await teams.findAll({ relations: ["members"] });
+    const [team] = await teams.findAll();
     expect(team.members).toEqual([
       { member_id: 10, name: "kim", team_id: 2 },
       { member_id: 11, name: "lee", team_id: 2 },

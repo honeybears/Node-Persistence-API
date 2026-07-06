@@ -172,16 +172,8 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
   };
 
   findAll = async (
-    load?: NPAFindOptions<TEntity>,
+    load?: NPAFindOptions<TEntity> & NPALoadOptions<TEntity>,
   ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>> => {
-    if (load?.select && load.select.length === 0) {
-      throw new Error("Select projection requires at least one property.");
-    }
-
-    if (load?.select?.length && load.relations) {
-      throw new Error("findAll select projections cannot be combined with relation loading.");
-    }
-
     if (load?.pageable) {
       return this.executePageQuery(
         findAllInvocation(load),
@@ -189,7 +181,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       );
     }
 
-    if (load?.orderBy?.length || load?.select?.length) {
+    if (load?.orderBy?.length) {
       const invocation = findAllInvocation(load);
       const query = compileMysqlQuery(invocation, this.options);
       const result = await executeMysqlQuery<TEntity>(
@@ -197,10 +189,6 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
         query.text,
         query.values,
       );
-
-      if (invocation.select?.length) {
-        return result.rows;
-      }
 
       return this.manageMany(this.attachLazy(await this.loadRelations(result.rows, load)));
     }
@@ -400,9 +388,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
 
     if (isOffsetPageable(pageable)) {
-      const rows = invocation.select?.length
-        ? result.rows
-        : await this.loadRelations(result.rows, load);
+      const rows = await this.loadRelations(result.rows, load);
       const countQuery = compileMysqlQuery(
         {
           query: {
@@ -422,9 +408,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
       );
 
       return createPage(
-        invocation.select?.length
-          ? rows
-          : this.manageMany(this.attachLazy(rows)),
+        this.manageMany(this.attachLazy(rows)),
         pageable,
         Number(countResult.rows[0]?.count ?? 0),
       );
@@ -436,13 +420,6 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
     const window = createCursorWindow(result.rows, query.cursor);
     const rows = stripCursorKeys(window.content, query.cursor);
-
-    if (invocation.select?.length) {
-      return {
-        ...window,
-        content: rows,
-      };
-    }
 
     const loaded = await this.loadRelations(rows, load);
 
@@ -931,7 +908,6 @@ function findAllInvocation<TEntity extends object>(
     },
     args: [],
     pageable: load?.pageable,
-    select: load?.select,
   };
 }
 

@@ -213,20 +213,6 @@ export abstract class UserRepository extends NPARepository<User, number> {
 Supported query modifiers include `Distinct`, `IgnoreCase`, `AllIgnoreCase`,
 `First`/`Top`, and compound order clauses such as `OrderByNameAscAgeDesc`.
 
-Load relations explicitly on base reads:
-
-```ts
-const user = await users.findById(1, {
-  relations: {
-    roles: true,
-    team: {
-      organization: true,
-    },
-  },
-});
-const teams = await teamRepository.findAll({ relations: { members: true } });
-```
-
 Sort or project base reads without creating derived methods:
 
 ```ts
@@ -237,18 +223,10 @@ const activeUsers = await users.findAll({
   ],
 });
 
-const names = await users.findAll({
-  select: ['id', 'name'] as const,
-  orderBy: [{ property: 'name' }],
-});
+const names = await users.findAll({ orderBy: [{ property: 'name' }] });
 ```
 
-`select` projection returns plain partial rows keyed by entity property names.
-`select` cannot be combined with relation loading or `@EntityGraph`. Cursor
-pagination can use projection rows; NPA adds any ordered cursor values as hidden
-select aliases and removes them before returning content. Cursor pagination can
-also be combined with relation loading or `@EntityGraph` when returning full
-entity rows.
+Cursor pagination can also be combined with `@EntityGraph`.
 
 Use `@EntityGraph` on a repository method when that method should always load
 specific relations. Undecorated query methods do not receive entity graph
@@ -379,16 +357,20 @@ npa migrate deploy
 `migrate dev` applies pending local migration files, creates a new
 `npa/migrations/<timestamp>_<name>/migration.sql` from the current entity diff,
 writes a best-effort `down.sql`, and applies it unless `--create-only` is
-passed. `migrate deploy` does not parse entities; it applies pending migration
-files in order, verifies their checksums against `_npa_migrations`, and fails
-when the database contains applied migration history that is missing locally
-unless `--allow-drift` is passed. You can also pass flags directly:
+passed. Use `--migrations-dir <dir>` or `migrations.dir` in `npa.config.mjs` to
+write and read migration files from a custom directory. `migrate deploy` does
+not parse entities; it applies pending migration files in order, verifies their
+checksums against `_npa_migrations`, and fails when a previously applied file's
+checksum changed or when the database contains applied migration history that is
+missing locally unless `--allow-drift` is passed. You can also pass flags
+directly:
 
 ```bash
 npa migrate dev \
   --name add_users \
   --adapter mysql \
   --url "$DATABASE_URL" \
+  --migrations-dir db/migrations \
   --entities "src/**/*.entity.ts" \
   --rename "column:users.full_name=name"
 ```
@@ -427,8 +409,8 @@ const users = npa.get(UserRepository);
 
 await users.insert({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
-await users.findById(1, { relations: { roles: true, team: true } });
-await users.findAll({ relations: { team: true } });
+await users.findById(1);
+await users.findAll();
 await users.existsById(1);
 await users.count();
 await users.updateById(1, { name: 'park' });
@@ -459,8 +441,8 @@ const users = npa.get(UserRepository);
 
 await users.insert({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
-await users.findById(1, { relations: { roles: true, team: true } });
-await users.findAll({ relations: { team: true } });
+await users.findById(1);
+await users.findAll();
 await users.existsById(1);
 await users.count();
 await users.updateById(1, { name: 'park' });
@@ -573,15 +555,15 @@ context, so inserts and deletes flush with the transaction.
 
 ## Pagination
 
-`findAll` accepts `pageable` together with relation load options. Offset
-pagination returns `Page<T>` with a count query; cursor pagination returns
-`CursorPage<T>` with bidirectional keyset cursors.
+`findAll` accepts `pageable`. Offset pagination returns `Page<T>` with a count
+query; cursor pagination returns `CursorPage<T>` with bidirectional keyset
+cursors. Use `@EntityGraph` on repository methods that should return paged rows
+with loaded relations.
 
 ```ts
 import { Pageable, type CursorPage, type Page } from '@node-persistence-api/core';
 
 const page: Page<User> = await users.findAll({
-  relations: { profile: true },
   pageable: Pageable.offset(0, 20),
 });
 

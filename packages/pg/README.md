@@ -32,7 +32,7 @@ const users = npa.get(UserRepository);
 await users.insert({ name: 'kim' });
 await users.findById(1);
 await users.findByNameContainingIgnoreCase('ki');
-await users.findAll({ select: ['id', 'name'] as const, orderBy: [{ property: 'name' }] });
+await users.findAll({ orderBy: [{ property: 'name' }] });
 ```
 
 Pass a transaction-capable connection when repository calls must share a

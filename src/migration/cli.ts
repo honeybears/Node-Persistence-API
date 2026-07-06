@@ -306,6 +306,7 @@ function loadConfig(cwd: string, values: Record<string, string>) {
     adapter: values.adapter,
     url: values.url,
     entities: values.entities ? splitList(values.entities) : undefined,
+    migrationsDir: values.migrationsDir,
   });
 }
 

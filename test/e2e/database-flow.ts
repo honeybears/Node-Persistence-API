@@ -2,7 +2,7 @@ import * as mysql from "mysql2/promise";
 import { Pool } from "pg";
 import { MySqlContainer } from "@testcontainers/mysql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
-import { Column, Entity, Id, Pageable, Version } from "../../src";
+import { Column, Entity, Id, Version } from "../../src";
 import { PostgresqlConnection, PostgresqlTransactionManager, createPostgresqlDerivedQueryRepository } from "../../packages/pg/src";
 import { MysqlConnection, MysqlTransactionManager, createMysqlDerivedQueryRepository, type MysqlTransactionConnection } from "../../packages/mysql/src";
 import { expect } from "@jest/globals";
@@ -199,50 +199,6 @@ async function assertRepositoryContract(
     "desk gamma",
     "chair beta",
     "desk beta",
-  ]);
-
-  const projection = await repository.findAll({
-    select: ["id", "name"],
-    orderBy: [{ property: "name", direction: "asc" }],
-  });
-  expect(projection).toEqual([
-    { id: expect.any(Number), name: "chair beta" },
-    { id: expect.any(Number), name: "desk beta" },
-    { id: expect.any(Number), name: "desk gamma" },
-  ]);
-
-  const projectionPage = await repository.findAll({
-    select: ["id", "name"],
-    orderBy: [{ property: "name", direction: "asc" }],
-    pageable: Pageable.offset(0, 2),
-  });
-  expect(projectionPage.content).toEqual([
-    { id: expect.any(Number), name: "chair beta" },
-    { id: expect.any(Number), name: "desk beta" },
-  ]);
-  expect(projectionPage.totalElements).toEqual(3);
-
-  const projectionCursorPage = await repository.findAll({
-    select: ["name"],
-    orderBy: [{ property: "name", direction: "asc" }],
-    pageable: Pageable.cursor({ size: 2 }),
-  });
-  expect(projectionCursorPage.content).toEqual([
-    { name: "chair beta" },
-    { name: "desk beta" },
-  ]);
-  expect(projectionCursorPage.nextCursor).toEqual(expect.any(String));
-
-  const nextProjectionCursorPage = await repository.findAll({
-    select: ["name"],
-    orderBy: [{ property: "name", direction: "asc" }],
-    pageable: Pageable.cursor({
-      after: projectionCursorPage.nextCursor!,
-      size: 2,
-    }),
-  });
-  expect(nextProjectionCursorPage.content).toEqual([
-    { name: "desk gamma" },
   ]);
 
   const desks =

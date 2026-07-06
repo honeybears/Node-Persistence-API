@@ -427,14 +427,12 @@ describe("derived query methods", () => {
     );
 
     await repository.findById(1);
-    await repository.findById(2, { relations: ["roles"] });
     await repository.findAll({
       orderBy: [{ property: "name", direction: "desc" }],
       pageable: Pageable.offset(0, 10),
     });
     expect(loads).toEqual([
       { relations: ["team"] },
-      { relations: ["team", "roles"] },
       {
         relations: ["team"],
         orderBy: [{ property: "name", direction: "desc" }],
@@ -624,100 +622,4 @@ describe("derived query methods", () => {
     expect(previousPage.content).toEqual([rows[0], rows[1]]);
   });
 
-  test("executes find projections with order and offset pages in memory", () => {
-    const rows = [
-      { id: 1, name: "kim", age: 32 },
-      { id: 2, name: "lee", age: 28 },
-      { id: 3, name: "park", age: 41 },
-    ];
-    const executor = new InMemoryRepositoryExecutor(rows);
-
-    expect(
-      executor.execute({
-        query: {
-          methodName: "findAll",
-          action: "find",
-          predicate: [],
-          orderBy: [{ property: "name", direction: "desc" }],
-          parameterCount: 0,
-        },
-        args: [],
-        select: ["id", "name"],
-      }),
-    ).toEqual([
-      { id: 3, name: "park" },
-      { id: 2, name: "lee" },
-      { id: 1, name: "kim" },
-    ]);
-
-    expect(
-      executor.execute({
-        query: {
-          methodName: "findAll",
-          action: "find",
-          predicate: [],
-          orderBy: [{ property: "name", direction: "asc" }],
-          parameterCount: 0,
-        },
-        args: [],
-        select: ["name"],
-        pageable: Pageable.offset(1, 1),
-      }),
-    ).toMatchObject({
-      content: [{ name: "lee" }],
-      totalElements: 3,
-      totalPages: 3,
-    });
-
-    const firstCursorPage = executor.execute({
-      query: {
-        methodName: "findAll",
-        action: "find",
-        predicate: [],
-        orderBy: [{ property: "name", direction: "asc" }],
-        parameterCount: 0,
-      },
-      args: [],
-      select: ["name"],
-      pageable: Pageable.cursor({ size: 2 }),
-    });
-
-    expect((firstCursorPage as { content: unknown[] }).content).toEqual([
-      { name: "kim" },
-      { name: "lee" },
-    ]);
-    expect((firstCursorPage as { hasNextPage: boolean }).hasNextPage).toEqual(true);
-
-    const secondCursorPage = executor.execute({
-      query: {
-        methodName: "findAll",
-        action: "find",
-        predicate: [],
-        orderBy: [{ property: "name", direction: "asc" }],
-        parameterCount: 0,
-      },
-      args: [],
-      select: ["name"],
-      pageable: Pageable.cursor({
-        after: (firstCursorPage as { nextCursor: string }).nextCursor,
-        size: 2,
-      }),
-    }) as { content: unknown[]; hasNextPage: boolean };
-    expect(secondCursorPage.content).toEqual([{ name: "park" }]);
-    expect(secondCursorPage.hasNextPage).toEqual(false);
-
-    expect(() =>
-      executor.execute({
-        query: {
-          methodName: "findAll",
-          action: "find",
-          predicate: [],
-          orderBy: [],
-          parameterCount: 0,
-        },
-        args: [],
-        select: [],
-      }),
-    ).toThrow(/Select projection requires at least one property/);
-  });
 });
