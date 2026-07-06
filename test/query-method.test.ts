@@ -129,6 +129,23 @@ describe("derived query methods", () => {
       parameterCount: 2,
     });
 
+    expect(parseQueryMethod("countDistinctByRolesName")).toEqual({
+      methodName: "countDistinctByRolesName",
+      action: "count",
+      distinct: true,
+      predicate: [
+        {
+          condition: {
+            property: "rolesName",
+            operator: "equals",
+            parameterIndex: 0,
+          },
+        },
+      ],
+      orderBy: [],
+      parameterCount: 1,
+    });
+
     expect(parseQueryMethod("findFirstByName").limit).toEqual(1);
     expect(parseQueryMethod("findTopByName").limit).toEqual(1);
   });
@@ -509,6 +526,7 @@ describe("derived query methods", () => {
       true,
     );
     expect(repository.countByAgeBetween(25, 35)).toEqual(2);
+    expect(repository.countDistinctByAgeBetween(25, 35)).toEqual(2);
     expect(repository.findByNameContainingIgnoreCase("KIM")).toEqual([
       rows[0],
       rows[2],

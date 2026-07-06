@@ -207,12 +207,17 @@ export abstract class UserRepository extends NPARepository<User, number> {
   ): Promise<User[]>;
   abstract findFirstByEmailAllIgnoreCase(email: string): Promise<User[]>;
   abstract existsByName(name: string): Promise<boolean>;
+  abstract countByTeamName(name: string): Promise<number>;
+  abstract countDistinctByRolesName(name: string): Promise<number>;
   abstract deleteByNameContaining(name: string): Promise<number>;
 }
 ```
 
 Supported query modifiers include `Distinct`, `IgnoreCase`, `AllIgnoreCase`,
 `First`/`Top`, and compound order clauses such as `OrderByNameAscAgeDesc`.
+Use `countBy...` for simple counts and `countDistinctBy...` when relation joins
+can duplicate the root row. Aggregates beyond count, grouping, and custom
+projections belong in `@Query`.
 
 Sort or project base reads without creating derived methods:
 
@@ -666,7 +671,7 @@ The current codebase is suitable for demos, but the following items are needed
 before treating NPA as a fuller ORM:
 
 - Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
-- Query API: add aggregate/groupBy support and bulk update by condition.
+- Query API: add bulk update by condition.
 - Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
 - Relations: add safer relation mutation helpers.
 - Entity mapping: add enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
