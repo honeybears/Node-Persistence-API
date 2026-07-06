@@ -12,13 +12,13 @@ Foundation, Jakarta EE, Spring, or Broadcom.
 
 ## Packages
 
-| Package | README | Purpose |
+| Package | Link | Purpose |
 | --- | --- | --- |
-| `@node-persistence-api/core` | this file | decorators, repositories, migrations, transactions |
-| `@node-persistence-api/connector-pg` | [packages/pg](./packages/pg/README.md) | PostgreSQL runtime adapter |
-| `@node-persistence-api/connector-mysql` | [packages/mysql](./packages/mysql/README.md) | MySQL runtime adapter |
-| `@node-persistence-api/language` | [packages/language](./packages/language/README.md) | editor-independent completions and diagnostics |
-| `npa` | [packages/vscode](./packages/vscode/README.md) | VS Code extension |
+| `@node-persistence-api/core` | [npm](https://www.npmjs.com/package/@node-persistence-api/core) | decorators, repositories, migrations, transactions |
+| `@node-persistence-api/connector-pg` | [npm](https://www.npmjs.com/package/@node-persistence-api/connector-pg) | PostgreSQL runtime adapter |
+| `@node-persistence-api/connector-mysql` | [npm](https://www.npmjs.com/package/@node-persistence-api/connector-mysql) | MySQL runtime adapter |
+| `@node-persistence-api/language` | [npm](https://www.npmjs.com/package/@node-persistence-api/language) | editor-independent completions and diagnostics |
+| `npa` | [GitHub](https://github.com/honeybears/Node-Persistence-API/tree/main/packages/vscode) | VS Code extension; Marketplace release coming soon |
 
 ## Install
 
