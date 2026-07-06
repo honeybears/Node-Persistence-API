@@ -1,6 +1,7 @@
 import { NPAQueryError } from "../error";
 import { createDerivedQueryRepository } from "./create-derived-query-repository";
 import { getEntityGraphMetadata } from "./entity-graph-decorator";
+import { createRelationMutations } from "./relation-mutation";
 import {
   NPARepository,
   NPARepositoryAdapter,
@@ -34,6 +35,8 @@ export function createNPARepository<
       existsById: adapter.existsById,
       count: adapter.count,
       save: adapter.save,
+      saveAll: (entities: Iterable<TEntity>) => saveAll(entities, adapter),
+      relations: (entity: TEntity) => createRelationMutations(entity),
       remove: adapter.remove,
       delete: adapter.delete,
       deleteById: adapter.deleteById,
@@ -59,6 +62,19 @@ export function createNPARepository<
       return adapter.executeRawQuery(invocation);
     },
   ) as TRepository & NPARepository<TEntity, TId>;
+}
+
+async function saveAll<TEntity extends object>(
+  entities: Iterable<TEntity>,
+  adapter: Pick<NPARepositoryAdapter<TEntity>, "save">,
+): Promise<Array<TEntity | null>> {
+  const saved: Array<TEntity | null> = [];
+
+  for (const entity of entities) {
+    saved.push(await adapter.save(entity));
+  }
+
+  return saved;
 }
 
 function toLoadOptions<TEntity extends object>(

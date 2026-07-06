@@ -7,5 +7,6 @@ export * from "./in-memory-repository-executor";
 export * from "./operations";
 export * from "./pagination";
 export * from "./query-decorator";
+export * from "./relation-mutation";
 export * from "./repository-decorator";
 export * from "./types";

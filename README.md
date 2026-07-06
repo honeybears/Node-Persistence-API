@@ -146,13 +146,16 @@ delete children removed from the collection. Relations are lazy by default; set
 `Relation<T>` lets a relation field hold either a lazy promise or an explicitly
 loaded value. Entity classes must be exported so repositories, application code,
 and migration tooling can reference them.
+Use `repository.relations(entity).roles.add(role)`, `remove(role)`, or
+`set([role])` to mutate loaded `@OneToMany` and `@ManyToMany` collections
+without manually initializing lazy arrays.
 
 ## Repository Usage
 
 Application code extends only NPA, not a database-specific repository type.
 `NPARepository` provides familiar persistence base methods including `findById`,
-`findAll`, `existsById`, `count`, `save`, `remove`, `delete`, `deleteById`,
-and `deleteAll`.
+`findAll`, `existsById`, `count`, `save`, `saveAll`, `remove`, `delete`,
+`deleteById`, and `deleteAll`.
 
 Declare repositories as abstract classes and bind them to entities with
 `@Repository`. Imported decorated repositories are auto-registered when
@@ -414,6 +417,10 @@ const npa = createNPA({
 const users = npa.get(UserRepository);
 
 await users.save({ name: 'kim', createdAt: new Date() });
+await users.saveAll([
+  { name: 'lee', createdAt: new Date() },
+  { name: 'park', createdAt: new Date() },
+]);
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
 await users.findById(1);
 await users.findAll();
@@ -558,6 +565,10 @@ NPA updates with `WHERE id = ? AND version = ?`, increments the version column,
 and throws `OptimisticLockError` when no row matches the expected version.
 `repository.save(entity)` and `repository.remove(entity)` also use the active
 context, so saves and deletes flush with the transaction.
+`repository.saveAll(entities)` follows Spring Data JPA's shape and calls
+`save` for each entity; it does not guarantee a single batch SQL statement.
+Loaded `@OneToMany` and `@ManyToMany` collections changed through
+`repository.relations(entity)` are flushed by the same context.
 
 ## Pagination
 
@@ -841,8 +852,7 @@ before treating NPA as a fuller ORM:
 
 - Query planning: cache parsed method names and compiled SQL templates per entity, adapter, and method name so repeat calls only bind values.
 - Query API: add bulk update by condition.
-- Batching: add findUnique-style same-tick batching and relation-loading batching inside transaction-aware scopes.
-- Relations: add safer relation mutation helpers.
+- Batching: add findUnique-style same-tick batching, relation-loading batching inside transaction-aware scopes, and backend batch insert/update execution for `saveAll`.
 - Entity mapping: add enum/json/array types, embedded value objects, column transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks and richer DDL for defaults/generated columns/enums.
 - Transactions: add more propagation modes.

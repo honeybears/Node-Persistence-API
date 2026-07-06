@@ -280,6 +280,51 @@ describe("derived query methods", () => {
     );
   });
 
+  test("saveAll delegates to save for each entity", async () => {
+    const calls: object[] = [];
+    const adapter: NPARepositoryAdapter<object, number> = {
+      async findById() {
+        return null;
+      },
+      async findAll() {
+        return [];
+      },
+      async existsById() {
+        return false;
+      },
+      async count() {
+        return 0;
+      },
+      async save(entity) {
+        calls.push(entity);
+        return { ...entity, saved: true };
+      },
+      async remove() {},
+      async delete() {
+        return 0;
+      },
+      async deleteById() {
+        return 0;
+      },
+      async deleteAll() {
+        return 0;
+      },
+      async executeDerivedQuery() {
+        return undefined;
+      },
+    };
+
+    const repository = createNPARepository({}, adapter);
+    const first = { id: 1 };
+    const second = { id: 2 };
+
+    await expect(repository.saveAll([first, second])).resolves.toEqual([
+      { id: 1, saved: true },
+      { id: 2, saved: true },
+    ]);
+    expect(calls).toEqual([first, second]);
+  });
+
   test("routes @Query repository methods through the raw query executor", async () => {
     const calls: RepositoryRawQueryInvocation[] = [];
 
