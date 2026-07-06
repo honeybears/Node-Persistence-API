@@ -61,49 +61,48 @@ import {
   CreatedAt,
   CascadeType,
   Entity,
-  GenerationStrategy,
+  FetchType,
   Id,
   Index,
   ManyToMany,
   ManyToOne,
-  OneToOne,
-  OneToMany,
-  ReferentialAction,
   UpdatedAt,
   Version,
   type Relation,
 } from '@node-persistence-api/core';
 
+@Entity({ name: 'npa_users', schema: 'app' })
 @Index([
-  { name: 'idx_users_name_created_at', columns: ['name', 'createdAt'] },
-  { name: 'uidx_users_name_created_at', columns: ['name', 'createdAt'], unique: true },
+  { name: 'idx_users_team_created_at', columns: ['team', 'createdAt'] },
+  { name: 'uidx_users_email', columns: ['email'], unique: true },
 ])
-@Entity({ name: 'users', schema: 'app' })
 class User {
-  @Id({ name: 'user_id', generationStrategy: GenerationStrategy.AUTO_INCREMENT })
-  id?: number;
+  @Id({ name: 'user_id', generationStrategy: 'AUTO_INCREMENT' })
+  id: number = 0;
 
   @Column({ name: 'full_name', unique: 'uidx_users_full_name' })
   name!: string;
 
+  @Column()
+  email!: string;
+
   @CreatedAt({ name: 'created_at', index: 'idx_users_created_at' })
-  createdAt!: Date;
+  createdAt!: number;
 
   @UpdatedAt({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Version()
+  @Version({ name: 'lock_version' })
   version!: number;
 
   @ManyToOne(() => Team, {
     joinColumn: 'team_id',
-    foreignKeyName: 'fk_users_team',
-    onDelete: ReferentialAction.SET_NULL,
-    cascade: [CascadeType.PERSIST],
+    cascade: [CascadeType.PERSIST, CascadeType.REMOVE],
+    fetch: FetchType.EAGER,
   })
-  team?: Relation<Team | null>;
+  team?: Team;
 
-  @ManyToMany(() => Role, { joinTable: 'user_roles' })
+  @ManyToMany(() => Role, { joinTable: 'user_roles', fetch: FetchType.LAZY })
   roles?: Relation<Role[]>;
 }
 ```
@@ -296,17 +295,24 @@ in first-appearance order. Reusing the same placeholder name reuses the
 same argument. MySQL receives `?` placeholders; PostgreSQL receives `$1`, `$2`, ... .
 
 ```ts
-import { NPARepository, Query, Repository } from '@node-persistence-api/core';
+import { NPARepository, Query, RawQueryResult, Repository } from '@node-persistence-api/core';
 
 @Repository(User)
 export abstract class UserRepository extends NPARepository<User, number> {
-  @Query('SELECT * FROM users WHERE email = :email', { result: 'one', managed: true })
+  @Query('SELECT * FROM users WHERE email = :email', {
+    result: RawQueryResult.ONE,
+    managed: true,
+  })
   findByEmailSql!: (email: string) => Promise<User | null>;
 
-  @Query('SELECT COUNT(*) AS total FROM users WHERE active = :active', { result: 'scalar' })
+  @Query('SELECT COUNT(*) AS total FROM users WHERE active = :active', {
+    result: RawQueryResult.SCALAR,
+  })
   countActiveSql!: (active: boolean) => Promise<number>;
 
-  @Query('UPDATE users SET active = :active WHERE id = :id', { result: 'execute' })
+  @Query('UPDATE users SET active = :active WHERE id = :id', {
+    result: RawQueryResult.EXECUTE,
+  })
   updateActiveSql!: (active: boolean, id: number) => Promise<number>;
 }
 ```

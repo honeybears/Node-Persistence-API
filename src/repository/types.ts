@@ -7,7 +7,7 @@ import type {
   PageRequest,
   Page,
 } from "./pagination";
-import type { NPARawQueryMetadata } from "./query-decorator";
+import type { RawQueryMetadata } from "./query-decorator";
 import type { NPARelationLoad } from "./relation-load-types";
 import type { NPARelationMutations } from "./relation-mutation";
 
@@ -44,7 +44,7 @@ export interface RepositoryMethodExecutor<TResult = unknown> {
 }
 
 export interface RepositoryRawQueryInvocation {
-  query: NPARawQueryMetadata;
+  query: RawQueryMetadata;
   methodName: string;
   args: unknown[];
   entityGraph?: NPAEntityGraphMetadata;
