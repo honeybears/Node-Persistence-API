@@ -29,7 +29,7 @@ const npa = createNPA({
 
 const users = npa.get(UserRepository);
 
-await users.insert({ name: 'kim' });
+await users.save({ name: 'kim' });
 await users.findById(1);
 await users.findByNameContainingIgnoreCase('ki');
 await users.findAll({ orderBy: [{ property: 'name' }] });
@@ -51,7 +51,7 @@ class UserService {
 
   @Transaction()
   async rename(id: number, name: string): Promise<void> {
-    await this.users.updateById(id, { name });
+    await this.users.save({ id, name });
   }
 }
 ```

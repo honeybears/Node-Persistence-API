@@ -79,14 +79,7 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findAll(options?: NPABaseFindOptions<TEntity>): Promise<TEntity[]>;
   abstract existsById(id: TId): Promise<boolean>;
   abstract count(): Promise<number>;
-  abstract persist(entity: TEntity): Promise<TEntity>;
   abstract save(entity: TEntity): Promise<TEntity | null>;
-  abstract insert(entity: TEntity): Promise<TEntity>;
-  abstract update(entity: TEntity): Promise<TEntity | null>;
-  abstract updateById(
-    id: TId,
-    patch: Partial<TEntity>,
-  ): Promise<TEntity | null>;
   abstract remove(entity: TEntity): Promise<void>;
   abstract delete(entityOrId: TEntity | TId): Promise<number>;
   abstract deleteById(id: TId): Promise<number>;
@@ -103,14 +96,7 @@ export interface NPARepositoryAdapter<TEntity extends object, TId = unknown> {
   ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>>;
   existsById(id: TId): Promise<boolean>;
   count(): Promise<number>;
-  persist(entity: TEntity): Promise<TEntity>;
   save(entity: TEntity): Promise<TEntity | null>;
-  insert(entity: TEntity): Promise<TEntity>;
-  update(entity: TEntity): Promise<TEntity | null>;
-  updateById(
-    id: TId,
-    patch: Partial<TEntity>,
-  ): Promise<TEntity | null>;
   remove(entity: TEntity): Promise<void>;
   delete(entityOrId: TEntity | TId): Promise<number>;
   deleteById(id: TId): Promise<number>;

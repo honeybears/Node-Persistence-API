@@ -124,9 +124,9 @@ to `@Index` to declare multiple indexes, and set `unique: true` for composite
 unique indexes. `@Column({ index: true })` and
 `@Column({ unique: true })` are shorthand for single-column indexes.
 Multiple `@Id` columns define a composite primary key for direct CRUD calls;
-pass an object id such as `{ tenantId, userId }` to `findById`, `updateById`,
-`existsById`, or `deleteById`. Composite ids are also supported for owning
-relation foreign keys and many-to-many join tables.
+pass an object id such as `{ tenantId, userId }` to `findById`, `existsById`,
+or `deleteById`. Composite ids are also supported for owning relation foreign
+keys and many-to-many join tables.
 `@ManyToOne` and owning `@OneToOne` create nullable foreign-key columns by
 default using `joinColumn` or the default `<property>_<targetIdColumn>` name;
 set `nullable: false` to generate `NOT NULL`. Owning `@OneToOne` also creates a
@@ -151,8 +151,8 @@ and migration tooling can reference them.
 
 Application code extends only NPA, not a database-specific repository type.
 `NPARepository` provides familiar persistence base methods including `findById`,
-`findAll`, `existsById`, `count`, `persist`, `save`, `insert`, `update`,
-`updateById`, `remove`, `delete`, `deleteById`, and `deleteAll`.
+`findAll`, `existsById`, `count`, `save`, `remove`, `delete`, `deleteById`,
+and `deleteAll`.
 
 Declare repositories as abstract classes and bind them to entities with
 `@Repository`. Imported decorated repositories are auto-registered when
@@ -413,13 +413,13 @@ const npa = createNPA({
 
 const users = npa.get(UserRepository);
 
-await users.insert({ name: 'kim', createdAt: new Date() });
+await users.save({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
 await users.findById(1);
 await users.findAll();
 await users.existsById(1);
 await users.count();
-await users.updateById(1, { name: 'park' });
+await users.save({ id: 1, name: 'park', createdAt: new Date() });
 await users.deleteById(1);
 await users.deleteAll();
 await users.findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc('ki');
@@ -445,13 +445,13 @@ const npa = createNPA({
 
 const users = npa.get(UserRepository);
 
-await users.insert({ name: 'kim', createdAt: new Date() });
+await users.save({ name: 'kim', createdAt: new Date() });
 await users.save({ id: 1, name: 'lee', createdAt: new Date() });
 await users.findById(1);
 await users.findAll();
 await users.existsById(1);
 await users.count();
-await users.updateById(1, { name: 'park' });
+await users.save({ id: 1, name: 'park', createdAt: new Date() });
 await users.deleteById(1);
 await users.deleteAll();
 await users.findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc('ki');
@@ -508,7 +508,7 @@ reuse the active transaction. Use
 `{ propagation: TransactionPropagation.REQUIRES_NEW }` to force a separate
 transaction, or `{ propagation: TransactionPropagation.NESTED }` to use a
 savepoint inside the current transaction. `readOnly: true` starts a read-only
-database transaction and rejects dirty-checking flushes, `persist`, and
+database transaction and rejects dirty-checking flushes, `save`, and
 `remove`.
 
 ```ts
@@ -532,7 +532,7 @@ class UserService {
 
   @Transaction({ isolation: TransactionIsolation.READ_COMMITTED })
   async renameUser(id: number, name: string): Promise<void> {
-    await this.users.updateById(id, { name });
+    await this.users.save({ id, name });
     await this.users.findById(id);
   }
 }
@@ -556,8 +556,8 @@ Repository results loaded inside a transaction are managed by the active
 transaction flushes changed columns before commit. If the entity has `@Version`,
 NPA updates with `WHERE id = ? AND version = ?`, increments the version column,
 and throws `OptimisticLockError` when no row matches the expected version.
-`repository.persist(entity)` and `repository.remove(entity)` also use the active
-context, so inserts and deletes flush with the transaction.
+`repository.save(entity)` and `repository.remove(entity)` also use the active
+context, so saves and deletes flush with the transaction.
 
 ## Pagination
 
@@ -729,7 +729,7 @@ Persistence codes:
 | `NPA_VERSION_VALUE_REQUIRED` | versioned entity is missing its version value |
 | `NPA_OPTIMISTIC_LOCK_FAILED` | optimistic lock update affected no rows |
 | `NPA_READ_ONLY_TRANSACTION_WRITE` | write attempted inside a read-only transaction |
-| `NPA_PERSIST_UNSUPPORTED` | adapter does not support persist for this path |
+| `NPA_PERSIST_UNSUPPORTED` | adapter does not support saving this path |
 | `NPA_REMOVE_UNSUPPORTED` | adapter does not support remove for this path |
 | `NPA_RELATION_SYNC_UNSUPPORTED` | adapter cannot sync relation changes |
 
@@ -779,8 +779,7 @@ Database and driver codes:
 
 1. Service code calls a method on `UserRepository`.
 2. Familiar persistence base methods (`findById`, `findAll`, `existsById`, `count`,
-   `persist`, `save`, `insert`, `updateById`, `remove`, `deleteById`,
-   `deleteAll`) go through the NPA adapter directly or the active persistence
+   `save`, `remove`, `deleteById`, `deleteAll`) go through the NPA adapter directly or the active persistence
    context. Deletes on entities with cascade remove or join-table cleanup load
    matching rows and run the remove path.
 3. Derived methods (`findBy...`, `existsBy...`, `countBy...`, `deleteBy...`) are

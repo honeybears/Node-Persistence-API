@@ -144,7 +144,7 @@ async function assertRepositoryContract(
   repository,
   options: { nullableStatus?: boolean } = {},
 ) {
-  const first = await repository.insert({
+  const first = await repository.save({
     name: "desk alpha",
     price: 120,
     active: true,
@@ -164,7 +164,8 @@ async function assertRepositoryContract(
   expect(await repository.findOneByName("missing product")).toEqual(null);
   expect(await repository.deleteByStatus("missing")).toEqual(0);
 
-  const updated = await repository.updateById(firstId, {
+  const updated = await repository.save({
+    product_id: firstId,
     name: "desk beta",
     price: 150,
     active: true,
@@ -176,14 +177,14 @@ async function assertRepositoryContract(
   expect(updated.price).toEqual(150);
   expect(updated.status).toEqual("published");
 
-  await repository.insert({
+  await repository.save({
     name: "chair beta",
     price: 80,
     active: false,
     status: "draft",
     createdAt: new Date("2026-01-02T00:00:00.000Z"),
   });
-  await repository.insert({
+  await repository.save({
     name: "desk gamma",
     price: 300,
     active: true,
@@ -215,7 +216,7 @@ async function assertRepositoryContract(
   expect(await repository.countByPriceGreaterThan(0)).toEqual(1);
   expect(await repository.deleteById(firstId)).toEqual(1);
   expect(await repository.countByPriceGreaterThan(0)).toEqual(0);
-  await repository.insert({
+  await repository.save({
     name: "floor lamp",
     price: 40,
     active: true,
@@ -231,14 +232,14 @@ async function assertRepositoryContract(
 }
 
 async function assertNullableStatusContract(repository) {
-  await repository.insert({
+  await repository.save({
     name: "null status",
     price: 50,
     active: true,
     status: null,
     createdAt: new Date("2026-01-05T00:00:00.000Z"),
   });
-  await repository.insert({
+  await repository.save({
     name: "active status",
     price: 60,
     active: true,

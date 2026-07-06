@@ -128,15 +128,15 @@ describe("database adapter E2E", () => {
           const members = adapter.createRepository({ entity: Member, queryable }) as RelationRepository;
           const roles = adapter.createRepository({ entity: Role, queryable });
 
-          const platform = await teams.insert({ label: "platform" });
-          const design = await teams.insert({ label: "design" });
+          const platform = await teams.save({ label: "platform" });
+          const design = await teams.save({ label: "design" });
           const platformId = platform.team_id;
           const designId = design.team_id;
 
-          const kim = await members.insert({ name: "kim", team: { id: platformId } });
-          const lee = await members.insert({ name: "lee", team: { id: designId } });
-          const admin = await roles.insert({ name: "admin" });
-          const writer = await roles.insert({ name: "writer" });
+          const kim = await members.save({ name: "kim", team: { id: platformId } });
+          const lee = await members.save({ name: "lee", team: { id: designId } });
+          const admin = await roles.save({ name: "admin" });
+          const writer = await roles.save({ name: "writer" });
 
           await adapter.executeSql(
             queryable,
@@ -162,8 +162,8 @@ describe("database adapter E2E", () => {
           expect(await members.deleteByTeamLabel("design")).toEqual(1);
           expect(await members.existsByTeamLabel("design")).toEqual(false);
 
-          await members.insert({ name: "pager", team: { id: designId } });
-          await members.insert({ name: "pager", team: { id: platformId } });
+          await members.save({ name: "pager", team: { id: designId } });
+          await members.save({ name: "pager", team: { id: platformId } });
 
           const firstPage = await members.findByNameOrderByTeamLabelAsc(
             "pager",
@@ -243,13 +243,13 @@ describe("database adapter E2E", () => {
           const users = adapter.createRepository({ entity: User, queryable }) as OneToOneRepository;
           const profiles = adapter.createRepository({ entity: Profile, queryable }) as OneToOneRepository;
 
-          const kim = await users.insert({ name: "kim" });
-          const lee = await users.insert({ name: "lee" });
-          const kimProfile = await profiles.insert({
+          const kim = await users.save({ name: "kim" });
+          const lee = await users.save({ name: "lee" });
+          const kimProfile = await profiles.save({
             bio: "builder",
             user: { id: kim.user_id },
           });
-          await profiles.insert({
+          await profiles.save({
             bio: "designer",
             user: { id: lee.user_id },
           });
@@ -320,7 +320,7 @@ describe("database adapter E2E", () => {
           const users = adapter.createRepository({ entity: TenantUser, queryable }) as NPARepository<Row, Row>;
           const id = { tenantId: "tenant-a", userId: "user-1" };
 
-          await users.insert({ ...id, name: "kim" });
+          await users.save({ ...id, name: "kim" });
 
           expect(await users.existsById(id)).toEqual(true);
           expect(await users.findById(id)).toMatchObject({
@@ -329,7 +329,7 @@ describe("database adapter E2E", () => {
             name: "kim",
           });
 
-          expect(await users.updateById(id, { name: "lee" })).toMatchObject({
+          expect(await users.save({ ...id, name: "lee" })).toMatchObject({
             tenant_id: "tenant-a",
             user_id: "user-1",
             name: "lee",
@@ -455,7 +455,7 @@ describe("database adapter E2E", () => {
             ],
           } as Row;
 
-          await teams.persist(team);
+          await teams.save(team);
 
           const teamId = entityId(team, "team_id");
           expect(await teams.count()).toEqual(1);
@@ -523,43 +523,43 @@ class ProductService {
   }
 
   async createThenFail(): Promise<void> {
-    await this.repository.insert(product("rollback one", 10));
-    await this.repository.insert(product("rollback two", 20));
+    await this.repository.save(product("rollback one", 10));
+    await this.repository.save(product("rollback two", 20));
     throw new Error("rollback");
   }
 
   async createTwo(): Promise<void> {
-    await this.repository.insert(product("commit one", 30));
-    await this.repository.insert(product("commit two", 40));
+    await this.repository.save(product("commit one", 30));
+    await this.repository.save(product("commit two", 40));
   }
 
   async requiredInnerFailure(): Promise<void> {
-    await this.repository.insert(product("required outer", 50));
+    await this.repository.save(product("required outer", 50));
 
     try {
       await this.innerRequiredFailure();
     } catch {
-      await this.repository.insert(product("required recovered", 60));
+      await this.repository.save(product("required recovered", 60));
     }
   }
 
   async innerRequiredFailure(): Promise<void> {
-    await this.repository.insert(product("required inner", 70));
+    await this.repository.save(product("required inner", 70));
     throw new Error("required inner rollback");
   }
 
   async requiresNewInnerFailure(): Promise<void> {
-    await this.repository.insert(product("requires-new outer", 80));
+    await this.repository.save(product("requires-new outer", 80));
 
     try {
       await this.innerRequiresNewFailure();
     } catch {
-      await this.repository.insert(product("requires-new recovered", 90));
+      await this.repository.save(product("requires-new recovered", 90));
     }
   }
 
   async innerRequiresNewFailure(): Promise<void> {
-    await this.repository.insert(product("requires-new inner", 100));
+    await this.repository.save(product("requires-new inner", 100));
     throw new Error("requires-new rollback");
   }
 
@@ -591,25 +591,25 @@ decorateMethod(
 decorateMethod(ProductService, "renameManagedProduct", Transaction());
 
 async function assertPaginationContract(repository: ProductRepository) {
-  await repository.insert(product(
+  await repository.save(product(
     "page alpha",
     10,
     "active",
     new Date("2026-01-01T00:00:00.000Z"),
   ));
-  await repository.insert(product(
+  await repository.save(product(
     "page beta",
     20,
     "active",
     new Date("2026-01-03T00:00:00.000Z"),
   ));
-  await repository.insert(product(
+  await repository.save(product(
     "page gamma",
     30,
     "active",
     new Date("2026-01-03T00:00:00.000Z"),
   ));
-  await repository.insert(product(
+  await repository.save(product(
     "page delta",
     40,
     "active",
@@ -719,7 +719,7 @@ async function assertTransactionIsolation(
             runtime.queryable,
           );
         }
-        await writerRepository.insert(
+        await writerRepository.save(
           product("isolation probe", 5, "isolation-probe"),
         );
         afterCount = await repository.countByStatus("isolation-probe");

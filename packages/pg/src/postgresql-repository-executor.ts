@@ -210,11 +210,20 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return Number(result.rows[0]?.count ?? 0);
   };
 
-  persist = async (entity: TEntity): Promise<TEntity> => {
+  save = async (
+    entity: TEntity,
+  ): Promise<TEntity | null> => {
+    const id = getPrimaryKeyValue(entity, this.options);
+    return id === null || id === undefined
+      ? this.persistEntity(entity)
+      : this.updateEntity(entity);
+  };
+
+  private persistEntity = async (entity: TEntity): Promise<TEntity> => {
     const entityTarget = this.getEntityTarget();
 
     if (!entityTarget) {
-      return this.insert(entity);
+      return this.insertEntity(entity);
     }
 
     const currentContext = getCurrentPersistenceContext();
@@ -231,16 +240,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return persisted;
   };
 
-  save = async (
-    entity: TEntity,
-  ): Promise<TEntity | null> => {
-    const id = getPrimaryKeyValue(entity, this.options);
-    return id === null || id === undefined
-      ? this.insert(entity)
-      : this.update(entity);
-  };
-
-  insert = async (entity: TEntity): Promise<TEntity> => {
+  private insertEntity = async (entity: TEntity): Promise<TEntity> => {
     const query = compilePostgresqlInsert(entity, this.options);
     const result = await this.options.queryable.query<TEntity>(
       query.text,
@@ -256,11 +256,11 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return this.manage(this.attachLazy([inserted])[0]);
   };
 
-  update = async (
+  private updateEntity = async (
     entity: TEntity,
   ): Promise<TEntity | null> => {
     const id = getPrimaryKeyValue(entity, this.options);
-    return this.updateById(
+    return this.updateEntityById(
       id as TId,
       withUpdatedAtTimestamp(entity, this.options.entity, new Date(), {
         overwrite: true,
@@ -268,7 +268,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
     );
   };
 
-  updateById = async (
+  private updateEntityById = async (
     id: TId,
     patch: Partial<TEntity>,
   ): Promise<TEntity | null> => {

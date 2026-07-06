@@ -1286,7 +1286,7 @@ describe("PostgreSQL adapter", () => {
       },
     );
 
-    expect(await repository.insert({ name: "kim", createdAt: 3 })).toEqual({
+    expect(await repository.save({ name: "kim", createdAt: 3 })).toEqual({
       id: 3,
       name: "kim",
       created_at: 3,
@@ -1296,7 +1296,7 @@ describe("PostgreSQL adapter", () => {
       name: "park",
       created_at: 3,
     });
-    expect(await repository.updateById(1, { name: "lee" })).toEqual({
+    expect(await repository.save({ id: 1, name: "lee" })).toEqual({
       id: 1,
       name: "lee",
       created_at: 3,
@@ -1390,7 +1390,7 @@ describe("PostgreSQL adapter", () => {
     ) as NPARepository<PgPlainProduct, number>;
     const product = { name: "desk" } as PgPlainProduct;
 
-    expect(await repository.persist(product)).toBe(product);
+    expect(await repository.save(product)).toBe(product);
     expect(product.id).toEqual(7);
     await repository.remove(product);
 
@@ -1431,7 +1431,7 @@ describe("PostgreSQL adapter", () => {
       roles: [{ id: 5, name: "admin" } as PgRole],
     } as PgMember;
 
-    await repository.persist(member);
+    await repository.save(member);
     await repository.remove(member);
 
     expect(calls).toEqual([
@@ -1486,7 +1486,7 @@ describe("PostgreSQL adapter", () => {
       members: [{ id: 1, name: "kim" } as PgMember],
     } as PgRole;
 
-    await repository.persist(role);
+    await repository.save(role);
 
     expect(calls).toEqual([
       {
@@ -1592,8 +1592,8 @@ describe("PostgreSQL adapter", () => {
       { entity: PgTimestampedProduct, queryable: asPgQueryable(queryable) },
     ) as NPARepository<Record<string, unknown>, number>;
 
-    await repository.insert({ name: "desk" });
-    await repository.updateById(1, { name: "chair" });
+    await repository.save({ name: "desk" });
+    await repository.save({ id: 1, name: "chair" });
 
     expect(calls).toEqual([
       {
@@ -1634,8 +1634,8 @@ describe("PostgreSQL adapter", () => {
       { entity: PgPlainProduct, queryable: asPgQueryable(queryable) },
     );
 
-    await versioned.updateById(1, { name: "chair", version: 0 });
-    await plain.updateById(2, { name: "desk" });
+    await versioned.save({ id: 1, name: "chair", version: 0 });
+    await plain.save({ id: 2, name: "desk" });
 
     expect(calls).toEqual([
       {

@@ -1118,11 +1118,12 @@ describe("MySQL adapter", () => {
       { entity: Product, queryable: asMysqlQueryable(queryable) },
     ) as NPARepository<Record<string, unknown>, unknown> & DynamicRepository;
 
-    expect(await repository.insert({ name: "desk", price: 120 })).toEqual({
+    expect(await repository.save({ name: "desk", price: 120 })).toEqual({
+      name: "desk",
+      price: 120,
       product_id: 10,
-      product_name: "desk",
     });
-    expect(await repository.updateById(10, { name: "table" })).toEqual({
+    expect(await repository.save({ id: 10, name: "table" })).toEqual({
       product_id: 10,
       product_name: "desk",
     });
@@ -1235,7 +1236,7 @@ describe("MySQL adapter", () => {
       createdAt: 1,
     } as Product;
 
-    expect(await repository.persist(product)).toBe(product);
+    expect(await repository.save(product)).toBe(product);
     expect(product.id).toEqual(10);
     await repository.remove(product);
 
@@ -1283,7 +1284,7 @@ describe("MySQL adapter", () => {
       roles: [{ id: 5, name: "admin" } as Role],
     } as Member;
 
-    await repository.persist(member);
+    await repository.save(member);
     await repository.remove(member);
 
     expect(calls).toEqual([
@@ -1341,7 +1342,7 @@ describe("MySQL adapter", () => {
       members: [{ id: 1, name: "kim" } as Member],
     } as Role;
 
-    await repository.persist(role);
+    await repository.save(role);
 
     expect(calls).toEqual([
       {
@@ -1437,8 +1438,8 @@ describe("MySQL adapter", () => {
       { entity: TimestampedProduct, queryable: asMysqlQueryable(queryable) },
     ) as NPARepository<Record<string, unknown>, number>;
 
-    await repository.insert({ name: "desk" });
-    await repository.updateById(10, { name: "chair" });
+    await repository.save({ name: "desk" });
+    await repository.save({ id: 10, name: "chair" });
 
     expect(calls).toEqual([
       {
@@ -1490,8 +1491,8 @@ describe("MySQL adapter", () => {
       { entity: Product, queryable: asMysqlQueryable(queryable) },
     );
 
-    await versioned.updateById(10, { name: "chair", version: 0 });
-    await plain.updateById(11, { name: "desk" });
+    await versioned.save({ id: 10, name: "chair", version: 0 });
+    await plain.save({ id: 11, name: "desk" });
 
     expect(calls).toEqual([
       {

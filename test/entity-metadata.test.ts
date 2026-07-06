@@ -329,10 +329,10 @@ describe("entity metadata", () => {
         },
       ) as DynamicUserRepository;
 
-      expect(await repository.insert({ name: "kim", createdAt: 10 })).toEqual({
+      expect(await repository.save({ name: "kim", createdAt: 10 })).toEqual({
         user_id: 1,
-        full_name: "kim",
-        created_at: 10,
+        name: "kim",
+        createdAt: 10,
       });
       await repository.findByName("kim");
 
