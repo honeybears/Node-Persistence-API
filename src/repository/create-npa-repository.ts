@@ -67,8 +67,8 @@ export function createNPARepository<
 async function saveAll<TEntity extends object>(
   entities: Iterable<TEntity>,
   adapter: Pick<NPARepositoryAdapter<TEntity>, "save">,
-): Promise<Array<TEntity | null>> {
-  const saved: Array<TEntity | null> = [];
+): Promise<TEntity[]> {
+  const saved: TEntity[] = [];
 
   for (const entity of entities) {
     saved.push(await adapter.save(entity));

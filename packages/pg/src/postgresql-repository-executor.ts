@@ -219,7 +219,7 @@ export class PostgresqlRepositoryExecutor<TEntity extends object, TId = unknown>
 
   save = async (
     entity: TEntity,
-  ): Promise<TEntity | null> => {
+  ): Promise<TEntity> => {
     const id = getPrimaryKeyValue(entity, this.options);
 
     if (id === null || id === undefined) {

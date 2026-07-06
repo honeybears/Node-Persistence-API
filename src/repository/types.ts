@@ -86,8 +86,8 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract findAll(options?: NPABaseFindOptions<TEntity>): Promise<TEntity[]>;
   abstract existsById(id: TId): Promise<boolean>;
   abstract count(): Promise<number>;
-  abstract save(entity: TEntity): Promise<TEntity | null>;
-  abstract saveAll(entities: Iterable<TEntity>): Promise<Array<TEntity | null>>;
+  abstract save(entity: TEntity): Promise<TEntity>;
+  abstract saveAll(entities: Iterable<TEntity>): Promise<TEntity[]>;
   abstract relations(entity: TEntity): NPARelationMutations<TEntity>;
   abstract remove(entity: TEntity): Promise<void>;
   abstract delete(entityOrId: TEntity | TId): Promise<number>;
@@ -105,7 +105,7 @@ export interface NPARepositoryAdapter<TEntity extends object, TId = unknown> {
   ): Promise<TEntity[] | Page<TEntity> | CursorPage<TEntity>>;
   existsById(id: TId): Promise<boolean>;
   count(): Promise<number>;
-  save(entity: TEntity): Promise<TEntity | null>;
+  save(entity: TEntity): Promise<TEntity>;
   remove(entity: TEntity): Promise<void>;
   delete(entityOrId: TEntity | TId): Promise<number>;
   deleteById(id: TId): Promise<number>;

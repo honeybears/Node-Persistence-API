@@ -232,7 +232,7 @@ export class MysqlRepositoryExecutor<TEntity extends object, TId = unknown>
     return Number(result.rows[0]?.count ?? 0);
   };
 
-  save = async (entity: TEntity): Promise<TEntity | null> => {
+  save = async (entity: TEntity): Promise<TEntity> => {
     const id = getMysqlPrimaryKeyValue(entity, this.options);
 
     if (id === null || id === undefined) {
