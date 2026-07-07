@@ -510,7 +510,7 @@ const npa = createNPA({
 });
 
 try {
-  await npa.get(UserRepository).insert(user);
+  await npa.get(UserRepository).save(user);
 } catch (error) {
   if (error instanceof NPADatabaseError) {
     console.error(error.code, error.details?.text, error.details?.values);

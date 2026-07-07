@@ -352,20 +352,8 @@ describe("derived query methods", () => {
       async count() {
         return 0;
       },
-      async persist(entity) {
-        return entity;
-      },
       async save(entity) {
         return entity;
-      },
-      async insert(entity) {
-        return entity;
-      },
-      async update(entity) {
-        return entity;
-      },
-      async updateById() {
-        return null;
       },
       async delete() {
         return 0;
@@ -452,20 +440,8 @@ describe("derived query methods", () => {
       async count() {
         return 0;
       },
-      async persist(entity) {
-        return entity;
-      },
       async save(entity) {
         return entity;
-      },
-      async insert(entity) {
-        return entity;
-      },
-      async update(entity) {
-        return entity;
-      },
-      async updateById() {
-        return null;
       },
       async delete() {
         return 0;
