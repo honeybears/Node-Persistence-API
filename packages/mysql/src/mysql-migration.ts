@@ -101,6 +101,12 @@ interface MysqlHistoryRow {
   checksum: string;
 }
 
+interface MysqlHistoryColumnRow {
+  columnName: string;
+}
+
+type HistoryStatus = "applied" | "failed";
+
 export interface MysqlMigrationCompileOptions {
   entities: MigrationEntitySchema[];
   historyTable?: string;
@@ -135,7 +141,9 @@ export function compileMysqlHistoryTable(historyTable: string): string {
     "  checksum VARCHAR(64) NOT NULL,",
     "  adapter VARCHAR(32) NOT NULL,",
     "  applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),",
-    "  statement_count INT NOT NULL",
+    "  statement_count INT NOT NULL,",
+    "  status VARCHAR(16) NOT NULL DEFAULT 'applied',",
+    "  error_message TEXT",
     ")",
   ].join("\n");
 }
@@ -245,55 +253,70 @@ export async function migrateMysql(
     }
 
     await acquireLock(connection);
-    await connection.query(compileMysqlHistoryTable(options.historyTable));
-    const previousChecksum = await readPreviousChecksum(connection, options.historyTable);
+    await ensureMysqlHistoryTable(connection, options.historyTable);
+    let statementCount = 0;
 
-    if (previousChecksum === options.checksum) {
+    try {
+      const previousChecksum = await readPreviousChecksum(connection, options.historyTable);
+
+      if (previousChecksum === options.checksum) {
+        return {
+          status: "noop",
+          checksum: options.checksum,
+          previousChecksum,
+          statements: [],
+          statementCount: 0,
+        };
+      }
+
+      const namespaceStatements = compileMysqlNamespaceStatements(options.entities);
+
+      for (const statement of namespaceStatements) {
+        await connection.query(statement);
+      }
+
+      const desiredTables = buildDesiredTables(options.entities);
+      const currentTables = await readCurrentTables(
+        connection,
+        migrationReadTables(desiredTables, options.renames),
+      );
+      const renameStatements = compileMysqlRenameStatements(
+        currentTables,
+        options.renames ?? [],
+      );
+      const tableStatements = [
+        ...renameStatements,
+        ...compileMysqlTableDiffStatements(desiredTables, currentTables),
+      ];
+      const migrationStatements = [...namespaceStatements, ...tableStatements];
+      statementCount = migrationStatements.length;
+
+      assertSafeMigrationStatements(tableStatements, options);
+
+      for (const statement of tableStatements) {
+        await connection.query(statement);
+      }
+
+      await upsertHistory(connection, options, statementCount, "applied");
+
       return {
-        status: "noop",
+        status: "applied",
         checksum: options.checksum,
         previousChecksum,
-        statements: [],
-        statementCount: 0,
+        statements: migrationStatements,
+        statementCount: migrationStatements.length,
       };
+    } catch (error) {
+      await recordHistoryFailure(
+        connection,
+        options,
+        MIGRATION_NAME,
+        options.checksum,
+        statementCount,
+        error,
+      );
+      throw error;
     }
-
-    const namespaceStatements = compileMysqlNamespaceStatements(options.entities);
-
-    for (const statement of namespaceStatements) {
-      await connection.query(statement);
-    }
-
-    const desiredTables = buildDesiredTables(options.entities);
-    const currentTables = await readCurrentTables(
-      connection,
-      migrationReadTables(desiredTables, options.renames),
-    );
-    const renameStatements = compileMysqlRenameStatements(
-      currentTables,
-      options.renames ?? [],
-    );
-    const tableStatements = [
-      ...renameStatements,
-      ...compileMysqlTableDiffStatements(desiredTables, currentTables),
-    ];
-    const migrationStatements = [...namespaceStatements, ...tableStatements];
-
-    assertSafeMigrationStatements(tableStatements, options);
-
-    for (const statement of tableStatements) {
-      await connection.query(statement);
-    }
-
-    await upsertHistory(connection, options, migrationStatements.length);
-
-    return {
-      status: "applied",
-      checksum: options.checksum,
-      previousChecksum,
-      statements: migrationStatements,
-      statementCount: migrationStatements.length,
-    };
   } finally {
     await Promise.resolve(connection.query("SELECT RELEASE_LOCK(?)", [LOCK_KEY])).catch(
       () => undefined,
@@ -315,65 +338,83 @@ export async function deployMysqlMigrations(
 
   try {
     await acquireLock(connection);
-    await connection.query(compileMysqlHistoryTable(options.historyTable));
-    await assertNoMysqlHistoryDrift(connection, options);
-    const results: MigrationDeployResult["migrations"] = [];
-    let statementCount = 0;
-    let pendingCount = 0;
+    await ensureMysqlHistoryTable(connection, options.historyTable);
+    let activeMigration: MigrationFile | undefined;
 
-    for (const migration of options.migrations) {
-      const existing = await readHistoryRecord(
-        connection,
-        options.historyTable,
-        migration.name,
-      );
+    try {
+      await assertNoMysqlHistoryDrift(connection, options);
+      const results: MigrationDeployResult["migrations"] = [];
+      let statementCount = 0;
+      let pendingCount = 0;
 
-      if (existing) {
-        if (existing.checksum !== migration.checksum) {
-          throw new NPAMigrationError(
-            `Migration ${migration.name} checksum mismatch. The migration file changed after it was applied.`,
-            {
-              code: "NPA_MIGRATION_CHECKSUM_MISMATCH",
-              details: {
-                migrationName: migration.name,
-                historyChecksum: existing.checksum,
-                fileChecksum: migration.checksum,
+      for (const migration of options.migrations) {
+        const existing = await readHistoryRecord(
+          connection,
+          options.historyTable,
+          migration.name,
+        );
+
+        if (existing) {
+          if (existing.checksum !== migration.checksum) {
+            throw new NPAMigrationError(
+              `Migration ${migration.name} checksum mismatch. The migration file changed after it was applied.`,
+              {
+                code: "NPA_MIGRATION_CHECKSUM_MISMATCH",
+                details: {
+                  migrationName: migration.name,
+                  historyChecksum: existing.checksum,
+                  fileChecksum: migration.checksum,
+                },
               },
-            },
-          );
+            );
+          }
+
+          results.push(toDeployResult(migration, "skipped"));
+          continue;
         }
 
-        results.push(toDeployResult(migration, "skipped"));
-        continue;
+        const status = options.dryRun ? "pending" : "applied";
+        results.push(toDeployResult(migration, status));
+        pendingCount += 1;
+        statementCount += migration.statementCount;
+
+        if (options.dryRun) {
+          continue;
+        }
+
+        activeMigration = migration;
+        assertSafeMigrationStatements(migration.statements, options);
+
+        for (const statement of migration.statements) {
+          await connection.query(statement);
+        }
+
+        await insertHistory(connection, options, migration, "applied");
+        activeMigration = undefined;
       }
 
-      const status = options.dryRun ? "pending" : "applied";
-      results.push(toDeployResult(migration, status));
-      pendingCount += 1;
-      statementCount += migration.statementCount;
-
-      if (options.dryRun) {
-        continue;
+      return {
+        status: options.dryRun
+          ? "dry-run"
+          : pendingCount === 0
+            ? "noop"
+            : "applied",
+        migrations: results,
+        statementCount,
+      };
+    } catch (error) {
+      if (activeMigration) {
+        await recordHistoryFailure(
+          connection,
+          options,
+          activeMigration.name,
+          activeMigration.checksum,
+          activeMigration.statementCount,
+          error,
+        );
       }
-
-      assertSafeMigrationStatements(migration.statements, options);
-
-      for (const statement of migration.statements) {
-        await connection.query(statement);
-      }
-
-      await insertHistory(connection, options, migration);
+      throw error;
     }
-
-    return {
-      status: options.dryRun
-        ? "dry-run"
-        : pendingCount === 0
-          ? "noop"
-          : "applied",
-      migrations: results,
-      statementCount,
-    };
   } finally {
     await Promise.resolve(connection.query("SELECT RELEASE_LOCK(?)", [LOCK_KEY])).catch(
       () => undefined,
@@ -999,10 +1040,6 @@ function joinColumnNames(
       : `${prefix}${primary.columnName}`);
 }
 
-function primaryColumn(entity: MigrationEntitySchema): MigrationColumnSchema {
-  return primaryColumns(entity)[0];
-}
-
 function primaryColumns(entity: MigrationEntitySchema): MigrationColumnSchema[] {
   const primary = entity.columns.filter((column) => column.primary);
 
@@ -1180,7 +1217,7 @@ async function readHistoryRecord(
 ): Promise<MysqlHistoryRow | undefined> {
   const result = normalizeMysqlResult<MysqlHistoryRow>(
     await connection.query(
-      `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE name = ? LIMIT 1`,
+      `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE name = ? AND status = 'applied' LIMIT 1`,
       [name],
     ),
   );
@@ -1194,7 +1231,7 @@ async function readHistoryRecords(
 ): Promise<MysqlHistoryRow[]> {
   const result = normalizeMysqlResult<MysqlHistoryRow>(
     await connection.query(
-      `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} ORDER BY name`,
+      `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE status = 'applied' ORDER BY name`,
     ),
   );
 
@@ -1235,18 +1272,18 @@ async function upsertHistory(
   connection: MysqlConnection,
   options: MigrationRunOptions,
   statementCount: number,
+  status: HistoryStatus,
+  errorMessage?: string,
 ): Promise<void> {
-  await connection.query(
-    [
-      `INSERT INTO ${quoteQualifiedIdentifier(options.historyTable)} (name, checksum, adapter, statement_count)`,
-      "VALUES (?, ?, ?, ?)",
-      "ON DUPLICATE KEY UPDATE",
-      "  checksum = VALUES(checksum),",
-      "  adapter = VALUES(adapter),",
-      "  applied_at = CURRENT_TIMESTAMP(3),",
-      "  statement_count = VALUES(statement_count)",
-    ].join("\n"),
-    [MIGRATION_NAME, options.checksum, options.adapter, statementCount],
+  await writeHistory(
+    connection,
+    options.historyTable,
+    MIGRATION_NAME,
+    options.checksum,
+    options.adapter,
+    statementCount,
+    status,
+    errorMessage,
   );
 }
 
@@ -1254,13 +1291,117 @@ async function insertHistory(
   connection: MysqlConnection,
   options: MigrationDeployOptions,
   migration: MigrationFile,
+  status: HistoryStatus,
+  errorMessage?: string,
+): Promise<void> {
+  await writeHistory(
+    connection,
+    options.historyTable,
+    migration.name,
+    migration.checksum,
+    options.adapter,
+    migration.statementCount,
+    status,
+    errorMessage,
+  );
+}
+
+async function ensureMysqlHistoryTable(
+  connection: MysqlConnection,
+  historyTable: string,
+): Promise<void> {
+  await ensureMysqlHistorySchema(connection, historyTable);
+  await connection.query(compileMysqlHistoryTable(historyTable));
+  const existingColumns = await readMysqlHistoryColumns(connection, historyTable);
+
+  if (!existingColumns.has("status")) {
+    await connection.query(
+      `ALTER TABLE ${quoteQualifiedIdentifier(historyTable)} ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'applied'`,
+    );
+  }
+
+  if (!existingColumns.has("error_message")) {
+    await connection.query(
+      `ALTER TABLE ${quoteQualifiedIdentifier(historyTable)} ADD COLUMN error_message TEXT`,
+    );
+  }
+}
+
+async function ensureMysqlHistorySchema(
+  connection: MysqlConnection,
+  historyTable: string,
+): Promise<void> {
+  const schema = parseMysqlQualifiedIdentifier(historyTable).schema;
+
+  if (schema) {
+    await connection.query(
+      `CREATE DATABASE IF NOT EXISTS ${quoteQualifiedIdentifier(schema)}`,
+    );
+  }
+}
+
+async function readMysqlHistoryColumns(
+  connection: MysqlConnection,
+  historyTable: string,
+): Promise<Set<string>> {
+  const table = parseMysqlQualifiedIdentifier(historyTable);
+  const result = normalizeMysqlResult<MysqlHistoryColumnRow>(
+    await connection.query(
+      [
+        "SELECT COLUMN_NAME AS columnName",
+        "FROM information_schema.columns",
+        `WHERE table_schema = ${table.schema ? "?" : "DATABASE()"} AND table_name = ?`,
+      ].join("\n"),
+      table.schema ? [table.schema, table.tableName] : [table.tableName],
+    ),
+  );
+
+  return new Set(result.rows.map((row) => row.columnName));
+}
+
+async function recordHistoryFailure(
+  connection: MysqlConnection,
+  options: Pick<MigrationRunOptions, "adapter" | "historyTable">,
+  name: string,
+  checksum: string,
+  statementCount: number,
+  error: unknown,
+): Promise<void> {
+  await writeHistory(
+    connection,
+    options.historyTable,
+    name,
+    checksum,
+    options.adapter,
+    statementCount,
+    "failed",
+    toHistoryErrorMessage(error),
+  );
+}
+
+async function writeHistory(
+  connection: MysqlConnection,
+  historyTable: string,
+  name: string,
+  checksum: string,
+  adapter: string,
+  statementCount: number,
+  status: HistoryStatus,
+  errorMessage?: string,
 ): Promise<void> {
   await connection.query(
     [
-      `INSERT INTO ${quoteQualifiedIdentifier(options.historyTable)} (name, checksum, adapter, statement_count)`,
-      "VALUES (?, ?, ?, ?)",
+      `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count, status, error_message)`,
+      "VALUES (?, ?, ?, ?, ?, ?)",
+      "ON DUPLICATE KEY UPDATE",
+      "  checksum = VALUES(checksum),",
+      "  adapter = VALUES(adapter),",
+      "  applied_at = CURRENT_TIMESTAMP(3),",
+      "  statement_count = VALUES(statement_count),",
+      "  status = VALUES(status),",
+      "  error_message = VALUES(error_message)",
     ].join("\n"),
-    [migration.name, migration.checksum, options.adapter, migration.statementCount],
+    [name, checksum, adapter, statementCount, status, errorMessage ?? null],
   );
 }
 
@@ -1290,9 +1431,14 @@ function compileHistoryUpsertPreview(
   statementCount: number,
 ): string {
   return [
-    `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count) VALUES ('${MIGRATION_NAME}', '${checksum}', 'mysql', ${statementCount})`,
-    "ON DUPLICATE KEY UPDATE checksum = VALUES(checksum), adapter = VALUES(adapter), applied_at = CURRENT_TIMESTAMP(3), statement_count = VALUES(statement_count)",
+    `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count, status, error_message) VALUES ('${MIGRATION_NAME}', '${checksum}', 'mysql', ${statementCount}, 'applied', NULL)`,
+    "ON DUPLICATE KEY UPDATE checksum = VALUES(checksum), adapter = VALUES(adapter), applied_at = CURRENT_TIMESTAMP(3), statement_count = VALUES(statement_count), status = VALUES(status), error_message = VALUES(error_message)",
   ].join("\n");
+}
+
+function toHistoryErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 2000);
 }
 
 function compileMysqlCreateIndex(
@@ -1380,6 +1526,23 @@ function quoteIdentifier(identifier: string): string {
   }
 
   return `\`${identifier.replace(/`/g, "``")}\``;
+}
+
+function unquoteIdentifier(identifier: string): string {
+  return identifier.replace(/^`|`$/g, "").replace(/``/g, "`");
+}
+
+function parseMysqlQualifiedIdentifier(identifier: string): {
+  schema?: string;
+  tableName: string;
+} {
+  const parts = identifier.split(".").map(unquoteIdentifier);
+  const tableName = parts.at(-1) ?? identifier;
+
+  return {
+    schema: parts.length > 1 ? parts.at(-2) : undefined,
+    tableName,
+  };
 }
 
 function compareEntities(

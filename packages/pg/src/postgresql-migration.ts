@@ -101,6 +101,8 @@ interface PostgresqlHistoryRow {
   checksum: string;
 }
 
+type HistoryStatus = "applied" | "failed";
+
 export interface PostgresqlMigrationCompileOptions {
   entities: MigrationEntitySchema[];
   historyTable?: string;
@@ -135,7 +137,9 @@ export function compilePostgresqlHistoryTable(historyTable: string): string {
     "  checksum TEXT NOT NULL,",
     "  adapter TEXT NOT NULL,",
     "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),",
-    "  statement_count INTEGER NOT NULL",
+    "  statement_count INTEGER NOT NULL,",
+    "  status TEXT NOT NULL DEFAULT 'applied',",
+    "  error_message TEXT",
     ")",
   ].join("\n");
 }
@@ -249,10 +253,11 @@ export async function migratePostgresql(
     }
 
     await connection.query("SELECT pg_advisory_lock(hashtext($1))", [LOCK_KEY]);
+    await ensurePostgresqlHistoryTable(connection, options.historyTable);
     await connection.query("BEGIN");
 
+    let statementCount = 0;
     try {
-      await connection.query(compilePostgresqlHistoryTable(options.historyTable));
       const previousChecksum = await readPreviousChecksum(connection, options.historyTable);
 
       if (previousChecksum === options.checksum) {
@@ -286,6 +291,7 @@ export async function migratePostgresql(
         ...compilePostgresqlTableDiffStatements(desiredTables, currentTables),
       ];
       const migrationStatements = [...namespaceStatements, ...tableStatements];
+      statementCount = migrationStatements.length;
 
       assertSafeMigrationStatements(tableStatements, options);
 
@@ -293,7 +299,7 @@ export async function migratePostgresql(
         await connection.query(statement);
       }
 
-      await upsertHistory(connection, options, migrationStatements.length);
+      await upsertHistory(connection, options, statementCount, "applied");
       await connection.query("COMMIT");
 
       return {
@@ -305,6 +311,7 @@ export async function migratePostgresql(
       };
     } catch (error) {
       await Promise.resolve(connection.query("ROLLBACK")).catch(() => undefined);
+      await recordHistoryFailure(connection, options, MIGRATION_NAME, options.checksum, statementCount, error);
       throw error;
     }
   } finally {
@@ -328,10 +335,11 @@ export async function deployPostgresqlMigrations(
 
   try {
     await connection.query("SELECT pg_advisory_lock(hashtext($1))", [LOCK_KEY]);
+    await ensurePostgresqlHistoryTable(connection, options.historyTable);
     await connection.query("BEGIN");
 
+    let activeMigration: MigrationFile | undefined;
     try {
-      await connection.query(compilePostgresqlHistoryTable(options.historyTable));
       await assertNoPostgresqlHistoryDrift(connection, options);
       const results: MigrationDeployResult["migrations"] = [];
       let statementCount = 0;
@@ -372,13 +380,15 @@ export async function deployPostgresqlMigrations(
           continue;
         }
 
+        activeMigration = migration;
         assertSafeMigrationStatements(migration.statements, options);
 
         for (const statement of migration.statements) {
           await connection.query(statement);
         }
 
-        await insertHistory(connection, options, migration);
+        await insertHistory(connection, options, migration, "applied");
+        activeMigration = undefined;
       }
 
       await connection.query("COMMIT");
@@ -394,6 +404,16 @@ export async function deployPostgresqlMigrations(
       };
     } catch (error) {
       await Promise.resolve(connection.query("ROLLBACK")).catch(() => undefined);
+      if (activeMigration) {
+        await recordHistoryFailure(
+          connection,
+          options,
+          activeMigration.name,
+          activeMigration.checksum,
+          activeMigration.statementCount,
+          error,
+        );
+      }
       throw error;
     }
   } finally {
@@ -1260,7 +1280,7 @@ async function readHistoryRecord(
   name: string,
 ): Promise<PostgresqlHistoryRow | undefined> {
   const result = await connection.query<PostgresqlHistoryRow>(
-    `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE name = $1 LIMIT 1`,
+    `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE name = $1 AND status = 'applied' LIMIT 1`,
     [name],
   );
 
@@ -1272,7 +1292,7 @@ async function readHistoryRecords(
   historyTable: string,
 ): Promise<PostgresqlHistoryRow[]> {
   const result = await connection.query<PostgresqlHistoryRow>(
-    `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} ORDER BY name`,
+    `SELECT name, checksum FROM ${quoteQualifiedIdentifier(historyTable)} WHERE status = 'applied' ORDER BY name`,
   );
 
   return result.rows;
@@ -1312,18 +1332,18 @@ async function upsertHistory(
   connection: PostgresqlConnection,
   options: MigrationRunOptions,
   statementCount: number,
+  status: HistoryStatus,
+  errorMessage?: string,
 ): Promise<void> {
-  await connection.query(
-    [
-      `INSERT INTO ${quoteQualifiedIdentifier(options.historyTable)} (name, checksum, adapter, statement_count)`,
-      "VALUES ($1, $2, $3, $4)",
-      "ON CONFLICT (name) DO UPDATE SET",
-      "  checksum = EXCLUDED.checksum,",
-      "  adapter = EXCLUDED.adapter,",
-      "  applied_at = NOW(),",
-      "  statement_count = EXCLUDED.statement_count",
-    ].join("\n"),
-    [MIGRATION_NAME, options.checksum, options.adapter, statementCount],
+  await writeHistory(
+    connection,
+    options.historyTable,
+    MIGRATION_NAME,
+    options.checksum,
+    options.adapter,
+    statementCount,
+    status,
+    errorMessage,
   );
 }
 
@@ -1331,13 +1351,91 @@ async function insertHistory(
   connection: PostgresqlConnection,
   options: MigrationDeployOptions,
   migration: MigrationFile,
+  status: HistoryStatus,
+  errorMessage?: string,
+): Promise<void> {
+  await writeHistory(
+    connection,
+    options.historyTable,
+    migration.name,
+    migration.checksum,
+    options.adapter,
+    migration.statementCount,
+    status,
+    errorMessage,
+  );
+}
+
+async function ensurePostgresqlHistoryTable(
+  connection: PostgresqlConnection,
+  historyTable: string,
+): Promise<void> {
+  await ensurePostgresqlHistorySchema(connection, historyTable);
+  await connection.query(compilePostgresqlHistoryTable(historyTable));
+  await connection.query(
+    `ALTER TABLE ${quoteQualifiedIdentifier(historyTable)} ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied'`,
+  );
+  await connection.query(
+    `ALTER TABLE ${quoteQualifiedIdentifier(historyTable)} ADD COLUMN IF NOT EXISTS error_message TEXT`,
+  );
+}
+
+async function ensurePostgresqlHistorySchema(
+  connection: PostgresqlConnection,
+  historyTable: string,
+): Promise<void> {
+  const schema = historyTable.split(".").at(-2);
+
+  if (schema) {
+    await connection.query(
+      `CREATE SCHEMA IF NOT EXISTS ${quoteQualifiedIdentifier(unquotePostgresqlIdentifier(schema))}`,
+    );
+  }
+}
+
+async function recordHistoryFailure(
+  connection: PostgresqlConnection,
+  options: Pick<MigrationRunOptions, "adapter" | "historyTable">,
+  name: string,
+  checksum: string,
+  statementCount: number,
+  error: unknown,
+): Promise<void> {
+  await writeHistory(
+    connection,
+    options.historyTable,
+    name,
+    checksum,
+    options.adapter,
+    statementCount,
+    "failed",
+    toHistoryErrorMessage(error),
+  );
+}
+
+async function writeHistory(
+  connection: PostgresqlConnection,
+  historyTable: string,
+  name: string,
+  checksum: string,
+  adapter: string,
+  statementCount: number,
+  status: HistoryStatus,
+  errorMessage?: string,
 ): Promise<void> {
   await connection.query(
     [
-      `INSERT INTO ${quoteQualifiedIdentifier(options.historyTable)} (name, checksum, adapter, statement_count)`,
-      "VALUES ($1, $2, $3, $4)",
+      `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count, status, error_message)`,
+      "VALUES ($1, $2, $3, $4, $5, $6)",
+      "ON CONFLICT (name) DO UPDATE SET",
+      "  checksum = EXCLUDED.checksum,",
+      "  adapter = EXCLUDED.adapter,",
+      "  applied_at = NOW(),",
+      "  statement_count = EXCLUDED.statement_count,",
+      "  status = EXCLUDED.status,",
+      "  error_message = EXCLUDED.error_message",
     ].join("\n"),
-    [migration.name, migration.checksum, options.adapter, migration.statementCount],
+    [name, checksum, adapter, statementCount, status, errorMessage ?? null],
   );
 }
 
@@ -1367,9 +1465,14 @@ function compileHistoryUpsertPreview(
   statementCount: number,
 ): string {
   return [
-    `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count) VALUES ('${MIGRATION_NAME}', '${checksum}', 'postgresql', ${statementCount})`,
-    "ON CONFLICT (name) DO UPDATE SET checksum = EXCLUDED.checksum, adapter = EXCLUDED.adapter, applied_at = NOW(), statement_count = EXCLUDED.statement_count",
+    `INSERT INTO ${quoteQualifiedIdentifier(historyTable)} (name, checksum, adapter, statement_count, status, error_message) VALUES ('${MIGRATION_NAME}', '${checksum}', 'postgresql', ${statementCount}, 'applied', NULL)`,
+    "ON CONFLICT (name) DO UPDATE SET checksum = EXCLUDED.checksum, adapter = EXCLUDED.adapter, applied_at = NOW(), statement_count = EXCLUDED.statement_count, status = EXCLUDED.status, error_message = EXCLUDED.error_message",
   ].join("\n");
+}
+
+function toHistoryErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(0, 2000);
 }
 
 function compilePostgresqlCreateIndex(
@@ -1519,6 +1622,10 @@ function quoteIdentifier(identifier: string): string {
   }
 
   return `"${identifier.replace(/"/g, '""')}"`;
+}
+
+function unquotePostgresqlIdentifier(identifier: string): string {
+  return identifier.replace(/^"|"$/g, "").replace(/""/g, '"');
 }
 
 function toSnakeCase(value: string): string {

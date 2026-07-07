@@ -49,7 +49,9 @@ describe("MySQL migration compiler", () => {
           "  checksum VARCHAR(64) NOT NULL,",
           "  adapter VARCHAR(32) NOT NULL,",
           "  applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),",
-          "  statement_count INT NOT NULL",
+          "  statement_count INT NOT NULL,",
+          "  status VARCHAR(16) NOT NULL DEFAULT 'applied',",
+          "  error_message TEXT",
           ")",
         ].join("\n"),
         [

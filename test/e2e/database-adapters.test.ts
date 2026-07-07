@@ -1,4 +1,6 @@
-import { CascadeType, Column, CursorPage, Entity, Id, ManyToOne, ManyToMany, NPARepository, OneToOne, Page, Pageable, TransactionIsolation, TransactionPropagation, OneToMany, RollbackOnlyError, Transaction } from "../../src";
+import { CascadeType, Column, CursorPage, Entity, EntityGraph, Id, ManyToOne, ManyToMany, NPARepository, OneToOne, Page, Pageable, Query, RawQueryResult, TransactionIsolation, TransactionPropagation, OneToMany, OptimisticLockError, RollbackOnlyError, Transaction } from "../../src";
+import { createPostgresqlDerivedQueryRepository } from "../../packages/pg/src";
+import { createMysqlDerivedQueryRepository } from "../../packages/mysql/src";
 import { assertRepositoryContract, createProductEntity, databaseAdapters, runDatabaseFlow, startContainerOrSkip, uniqueTableName } from "./database-flow";
 import { describe, expect, test } from "@jest/globals";
 
@@ -359,6 +361,154 @@ describe("database adapter E2E", () => {
 
   for (const adapter of databaseAdapters) {
     test(
+      `runs ${adapter.name} raw @Query methods against a real database`,
+      async () => {
+        const tableName = uniqueTableName(`${adapter.tablePrefix}_raw_query`);
+        const container = await startContainerOrSkip(adapter.createContainer());
+
+        if (!container) {
+          return;
+        }
+
+        let queryable;
+
+        try {
+          queryable = await adapter.createQueryable(container);
+          await adapter.executeSql(
+            queryable,
+            adapter.createTableSql(adapter.quoteIdentifier(tableName)),
+          );
+
+          const Product = createProductEntity(tableName);
+          const repository = createDecoratedRepository(
+            adapter,
+            queryable,
+            Product,
+            createRawProductRepository(adapter, tableName),
+          );
+          await repository.save(product("raw alpha", 10, "raw"));
+          await repository.save(product("raw beta", 20, "raw"));
+
+          expect((await repository.findRawByStatus("raw"))
+              .map((row) => row.product_name)
+              .sort()).toEqual(["raw alpha", "raw beta"]);
+          expect(await repository.countRawByStatus("raw")).toEqual(2);
+          expect(await repository.renameRawByStatus("renamed", "raw")).toEqual(2);
+          expect((await repository.findRawByStatus("renamed"))
+              .map((row) => row.product_name)
+              .sort()).toEqual(["renamed", "renamed"]);
+        } finally {
+          try {
+            if (queryable) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(tableName)}`,
+              );
+            }
+          } finally {
+            if (queryable) {
+              await adapter.closeQueryable(queryable);
+            }
+            await container.stop();
+          }
+        }
+      },
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
+      `runs ${adapter.name} EntityGraph E2E against a real database`,
+      async () => {
+        const userTableName = uniqueTableName(`${adapter.tablePrefix}_graph_users`);
+        const profileTableName = uniqueTableName(`${adapter.tablePrefix}_graph_profiles`);
+        const container = await startContainerOrSkip(adapter.createContainer());
+
+        if (!container) {
+          return;
+        }
+
+        let queryable;
+
+        try {
+          queryable = await adapter.createQueryable(container);
+          await adapter.executeSql(queryable, createOneToOneUserTableSql(adapter, userTableName));
+          await adapter.executeSql(
+            queryable,
+            createOneToOneProfileTableSql(adapter, profileTableName, userTableName),
+          );
+
+          const { User, Profile } = createOneToOneEntities(userTableName, profileTableName);
+          const users = createDecoratedRepository(
+            adapter,
+            queryable,
+            User,
+            createGraphUserRepository(),
+          );
+          const profiles = adapter.createRepository({ entity: Profile, queryable });
+          const user = await users.save({ name: "graph kim" });
+          await profiles.save({ bio: "loaded", user: { id: user.id } });
+
+          const loaded = await users.findById(user.id);
+          expect(loaded.name).toEqual("graph kim");
+          expect((loaded.profile as Row).bio).toEqual("loaded");
+        } finally {
+          try {
+            if (queryable) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(profileTableName)}`,
+              );
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(userTableName)}`,
+              );
+            }
+          } finally {
+            if (queryable) {
+              await adapter.closeQueryable(queryable);
+            }
+            await container.stop();
+          }
+        }
+      },
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
+      `detects ${adapter.name} optimistic lock conflicts against a real database`,
+      () =>
+        runDatabaseFlow(adapter, async ({ queryable, tableName }) => {
+          const Product = createProductEntity(tableName);
+          const firstRepository = adapter.createRepository({
+            entity: Product,
+            queryable,
+          }) as ProductRepository;
+          const secondRepository = adapter.createRepository({
+            entity: Product,
+            queryable,
+          }) as ProductRepository;
+          const created = await firstRepository.save(product("locked", 10));
+          const firstCopy = await firstRepository.findById(created.id);
+          const secondCopy = await secondRepository.findById(created.id);
+
+          firstCopy.name = "first";
+          secondCopy.name = "second";
+
+          await firstRepository.save(firstCopy);
+          await expect(secondRepository.save(secondCopy)).rejects.toThrow(
+            OptimisticLockError,
+          );
+        }),
+      240_000,
+    );
+  }
+
+  for (const adapter of databaseAdapters) {
+    test(
       `runs ${adapter.name} @Transaction E2E against a real database`,
       () =>
         runDatabaseFlow(adapter, async ({ container, tableName }) => {
@@ -513,6 +663,44 @@ describe("database adapter E2E", () => {
     );
   }
 });
+
+function createDecoratedRepository(adapter, queryable, entity, target) {
+  if (adapter.adapterName === "postgresql") {
+    return createPostgresqlDerivedQueryRepository(target, { entity, queryable });
+  }
+
+  return createMysqlDerivedQueryRepository(target, { entity, queryable });
+}
+
+function createRawProductRepository(adapter, tableName) {
+  class RawProductRepository {}
+
+  const table = adapter.quoteIdentifier(tableName);
+  const nameColumn = adapter.quoteIdentifier("product_name");
+  const statusColumn = adapter.quoteIdentifier("status");
+
+  Query(
+    `SELECT * FROM ${table} WHERE ${statusColumn} = :status`,
+  )(RawProductRepository.prototype, "findRawByStatus");
+  Query(
+    `SELECT COUNT(*) FROM ${table} WHERE ${statusColumn} = :status`,
+    { result: RawQueryResult.SCALAR },
+  )(RawProductRepository.prototype, "countRawByStatus");
+  Query(
+    `UPDATE ${table} SET ${nameColumn} = :name WHERE ${statusColumn} = :status`,
+    { result: RawQueryResult.EXECUTE },
+  )(RawProductRepository.prototype, "renameRawByStatus");
+
+  return new RawProductRepository();
+}
+
+function createGraphUserRepository() {
+  class GraphUserRepository {}
+
+  EntityGraph("profile")(GraphUserRepository.prototype, "findById");
+
+  return new GraphUserRepository();
+}
 
 class ProductService {
   readonly transactionManager: unknown;

@@ -468,6 +468,38 @@ describe("migration E2E", () => {
         expect(
           await readColumnNames(adapter, queryable, auditTableName),
         ).toEqual(["audit_id", "message", "reviewed"]);
+        expect(await readMigrationHistory(adapter, queryable, migrationDirs[0])).toEqual(
+          expect.objectContaining({
+            name: migrationDirs[0],
+            status: "applied",
+            statementCount: expect.any(Number),
+            errorMessage: null,
+          }),
+        );
+        expect(
+          await readMigrationHistory(
+            adapter,
+            queryable,
+            "99999999999991_create_audit",
+          ),
+        ).toEqual(expect.objectContaining({
+          name: "99999999999991_create_audit",
+          status: "applied",
+          statementCount: 1,
+          errorMessage: null,
+        }));
+        expect(
+          await readMigrationHistory(
+            adapter,
+            queryable,
+            "99999999999992_add_audit_reviewed",
+          ),
+        ).toEqual(expect.objectContaining({
+          name: "99999999999992_add_audit_reviewed",
+          status: "applied",
+          statementCount: 1,
+          errorMessage: null,
+        }));
 
         const redeploy = runCli(
           ["migrate", "deploy", "--config", "npa.config.mjs"],
@@ -630,7 +662,322 @@ describe("migration E2E", () => {
         }
       }
     }, 240_000);
+
+    test(`records failed migration attempts for ${adapter.name}`, async () => {
+      const missingTableName = uniqueTableName(`${adapter.tablePrefix}_missing`);
+      const migrationName = "99999999999992_failed_attempt";
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeMigrationProject({
+          adapter: adapter.adapterName,
+          tableName: uniqueTableName(`${adapter.tablePrefix}_failed_product`),
+          categoryTableName: uniqueTableName(`${adapter.tablePrefix}_failed_category`),
+          joinTableName: uniqueTableName(`${adapter.tablePrefix}_failed_join`),
+          statusIndexName: uniqueTableName(`${adapter.tablePrefix}_failed_status_idx`),
+          skuUniqueIndexName: uniqueTableName(`${adapter.tablePrefix}_failed_sku_uidx`),
+          url: container.getConnectionUri(),
+        });
+        writePendingMigration(root, "npa/migrations", migrationName, [
+          `ALTER TABLE ${adapter.quoteIdentifier(missingTableName)} ADD COLUMN broken INTEGER`,
+        ]);
+
+        const failed = runCli(
+          ["migrate", "deploy", "--config", "npa.config.mjs"],
+          root,
+        );
+        expect(failed.status).not.toEqual(0);
+
+        queryable = await adapter.createQueryable(container);
+        const history = await readMigrationHistory(adapter, queryable, migrationName);
+        expect(history).toEqual({
+          name: migrationName,
+          status: "failed",
+        });
+      } finally {
+        try {
+          if (queryable) {
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier("_npa_migrations")}`,
+            );
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+
+    test(`retries failed migration attempts for ${adapter.name}`, async () => {
+      const auditTableName = uniqueTableName(`${adapter.tablePrefix}_retry_audit`);
+      const missingTableName = uniqueTableName(`${adapter.tablePrefix}_retry_missing`);
+      const migrationName = "99999999999993_retry_attempt";
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeMigrationProject({
+          adapter: adapter.adapterName,
+          tableName: uniqueTableName(`${adapter.tablePrefix}_retry_product`),
+          categoryTableName: uniqueTableName(`${adapter.tablePrefix}_retry_category`),
+          joinTableName: uniqueTableName(`${adapter.tablePrefix}_retry_join`),
+          statusIndexName: uniqueTableName(`${adapter.tablePrefix}_retry_status_idx`),
+          skuUniqueIndexName: uniqueTableName(`${adapter.tablePrefix}_retry_sku_uidx`),
+          url: container.getConnectionUri(),
+        });
+        writePendingMigration(root, "npa/migrations", migrationName, [
+          `ALTER TABLE ${adapter.quoteIdentifier(missingTableName)} ADD COLUMN broken INTEGER`,
+        ]);
+
+        const failed = runCli(
+          ["migrate", "deploy", "--config", "npa.config.mjs"],
+          root,
+        );
+        expect(failed.status).not.toEqual(0);
+
+        queryable = await adapter.createQueryable(container);
+        expect(await readMigrationHistory(adapter, queryable, migrationName)).toEqual(
+          expect.objectContaining({ name: migrationName, status: "failed" }),
+        );
+
+        writePendingMigration(root, "npa/migrations", migrationName, [
+          createAuditTableSql(adapter, auditTableName),
+        ]);
+        const retried = runCli(
+          ["migrate", "deploy", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(retried);
+        expect(retried.stdout).toMatch(/Applied 1 migration\(s\)/);
+        expect(await readMigrationHistory(adapter, queryable, migrationName)).toEqual(
+          expect.objectContaining({ name: migrationName, status: "applied" }),
+        );
+        expect(await readColumnNames(adapter, queryable, auditTableName)).toEqual([
+          "audit_id",
+          "message",
+        ]);
+      } finally {
+        try {
+          if (queryable) {
+            for (const table of [auditTableName, "_npa_migrations"]) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(table)}`,
+              );
+            }
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+
+    test(`backfills legacy migration history columns for ${adapter.name}`, async () => {
+      const tableName = uniqueTableName(`${adapter.tablePrefix}_legacy_history`);
+      const categoryTableName = uniqueTableName(`${adapter.tablePrefix}_legacy_category`);
+      const joinTableName = uniqueTableName(`${adapter.tablePrefix}_legacy_join`);
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeMigrationProject({
+          adapter: adapter.adapterName,
+          tableName,
+          categoryTableName,
+          joinTableName,
+          statusIndexName: uniqueTableName(`${adapter.tablePrefix}_legacy_status_idx`),
+          skuUniqueIndexName: uniqueTableName(`${adapter.tablePrefix}_legacy_sku_uidx`),
+          url: container.getConnectionUri(),
+        });
+        queryable = await adapter.createQueryable(container);
+        await adapter.executeSql(queryable, createLegacyHistoryTableSql(adapter));
+
+        const pushed = runCli(
+          ["db", "push", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(pushed);
+
+        expect(await readColumnNames(adapter, queryable, "_npa_migrations")).toEqual(
+          expect.arrayContaining(["status", "error_message"]),
+        );
+        expect(await readMigrationHistory(adapter, queryable, "schema")).toEqual(
+          expect.objectContaining({ name: "schema", status: "applied" }),
+        );
+      } finally {
+        try {
+          if (queryable) {
+            for (const table of [
+              joinTableName,
+              categoryTableName,
+              tableName,
+              "_npa_migrations",
+            ]) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(table)}`,
+              );
+            }
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+
+    test(`runs schema-qualified migrations for ${adapter.name}`, async () => {
+      const schemaName = uniqueTableName(`${adapter.tablePrefix}_schema`);
+      const tableName = uniqueTableName(`${adapter.tablePrefix}_qualified_products`);
+      const historyTable = `${schemaName}.${uniqueTableName(`${adapter.tablePrefix}_history`)}`;
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeQualifiedMigrationProject({
+          adapter: adapter.adapterName,
+          schemaName,
+          tableName,
+          historyTable,
+          url: container.getConnectionUri(),
+        });
+        const pushed = runCli(
+          ["db", "push", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(pushed);
+
+        queryable = await adapter.createQueryable(container);
+        expect(
+          await readQualifiedColumnNames(adapter, queryable, schemaName, tableName),
+        ).toEqual(["product_id", "product_name"]);
+        expect(
+          await readQualifiedMigrationHistory(adapter, queryable, historyTable, "schema"),
+        ).toEqual(expect.objectContaining({ name: "schema", status: "applied" }));
+      } finally {
+        try {
+          if (queryable) {
+            await dropSchema(adapter, queryable, schemaName);
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+
+    test(`keeps migration deploy failure atomic for ${adapter.name}`, async () => {
+      const firstTableName = uniqueTableName(`${adapter.tablePrefix}_atomic_first`);
+      const secondTableName = uniqueTableName(`${adapter.tablePrefix}_atomic_second`);
+      const missingTableName = uniqueTableName(`${adapter.tablePrefix}_atomic_missing`);
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeMigrationProject({
+          adapter: adapter.adapterName,
+          tableName: uniqueTableName(`${adapter.tablePrefix}_atomic_product`),
+          categoryTableName: uniqueTableName(`${adapter.tablePrefix}_atomic_category`),
+          joinTableName: uniqueTableName(`${adapter.tablePrefix}_atomic_join`),
+          statusIndexName: uniqueTableName(`${adapter.tablePrefix}_atomic_status_idx`),
+          skuUniqueIndexName: uniqueTableName(`${adapter.tablePrefix}_atomic_sku_uidx`),
+          url: container.getConnectionUri(),
+        });
+        writePendingMigration(root, "npa/migrations", "99999999999994_atomic_first", [
+          createAuditTableSql(adapter, firstTableName),
+        ]);
+        writePendingMigration(root, "npa/migrations", "99999999999995_atomic_second", [
+          createAuditTableSql(adapter, secondTableName),
+          `ALTER TABLE ${adapter.quoteIdentifier(missingTableName)} ADD COLUMN broken INTEGER`,
+        ]);
+
+        const failed = runCli(
+          ["migrate", "deploy", "--config", "npa.config.mjs"],
+          root,
+        );
+        expect(failed.status).not.toEqual(0);
+
+        queryable = await adapter.createQueryable(container);
+        expect(await tableExists(adapter, queryable, firstTableName)).toEqual(
+          adapter.adapterName === "mysql",
+        );
+        expect(await tableExists(adapter, queryable, secondTableName)).toEqual(
+          adapter.adapterName === "mysql",
+        );
+        expect(
+          await readMigrationHistory(adapter, queryable, "99999999999994_atomic_first"),
+        ).toEqual(adapter.adapterName === "mysql"
+          ? expect.objectContaining({ status: "applied" })
+          : undefined);
+        expect(
+          await readMigrationHistory(adapter, queryable, "99999999999995_atomic_second"),
+        ).toEqual(expect.objectContaining({ status: "failed" }));
+      } finally {
+        try {
+          if (queryable) {
+            for (const table of [secondTableName, firstTableName, "_npa_migrations"]) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(table)}`,
+              );
+            }
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
   }
+
+  test("generated init example runs migrate dry-run", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "npa-init-e2e-"));
+    const init = runCli(["init", "--db", "pg", "--example"], root);
+    expectCliSuccess(init);
+
+    const dryRun = runCli(["migrate", "--dry-run"], root);
+    expectCliSuccess(dryRun);
+    expect(dryRun.stdout).toMatch(/Adapter: postgresql/);
+    expect(dryRun.stdout).toMatch(/CREATE TABLE IF NOT EXISTS/);
+  });
 });
 
 function runCli(args, cwd) {
@@ -688,6 +1035,38 @@ function makeMigrationProject(options) {
     "utf8",
   );
   writeProductEntity(root, options);
+  return root;
+}
+
+function makeQualifiedMigrationProject(options) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "npa-migrate-e2e-"));
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "npa.config.mjs"),
+    `export default {
+      adapter: ${JSON.stringify(options.adapter)},
+      url: ${JSON.stringify(options.url)},
+      entities: ["src/**/*.entity.ts"],
+      migrations: { table: ${JSON.stringify(options.historyTable)} }
+    };`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "product.entity.ts"),
+    `
+import { Column, Entity, GenerationStrategy, Id } from "@node-persistence-api/core";
+
+@Entity({ name: ${JSON.stringify(options.tableName)}, schema: ${JSON.stringify(options.schemaName)} })
+export class Product {
+  @Id({ name: "product_id", generationStrategy: GenerationStrategy.AUTO_INCREMENT })
+  id?: number;
+
+  @Column({ name: "product_name" })
+  name!: string;
+}
+`,
+    "utf8",
+  );
   return root;
 }
 
@@ -842,6 +1221,30 @@ function insertMigrationHistorySql(adapter, name) {
   ].join("\n");
 }
 
+function createLegacyHistoryTableSql(adapter) {
+  if (adapter.adapterName === "mysql") {
+    return [
+      "CREATE TABLE `_npa_migrations` (",
+      "  name VARCHAR(255) PRIMARY KEY,",
+      "  checksum VARCHAR(64) NOT NULL,",
+      "  adapter VARCHAR(32) NOT NULL,",
+      "  applied_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),",
+      "  statement_count INT NOT NULL",
+      ")",
+    ].join("\n");
+  }
+
+  return [
+    'CREATE TABLE "_npa_migrations" (',
+    "  name TEXT PRIMARY KEY,",
+    "  checksum TEXT NOT NULL,",
+    "  adapter TEXT NOT NULL,",
+    "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),",
+    "  statement_count INTEGER NOT NULL",
+    ")",
+  ].join("\n");
+}
+
 async function readColumnNames(adapter, queryable, tableName) {
   const rows = await queryRows(
     queryable,
@@ -960,6 +1363,102 @@ async function readForeignKeys(adapter, queryable, tableName) {
   }
 
   return foreignKeys;
+}
+
+async function readMigrationHistory(adapter, queryable, name) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          'SELECT name, checksum, status, statement_count AS "statementCount", error_message AS "errorMessage" FROM "_npa_migrations"',
+          "WHERE name = $1",
+        ].join("\n")
+      : [
+          "SELECT name, checksum, status, statement_count AS statementCount, error_message AS errorMessage FROM `_npa_migrations`",
+          "WHERE name = ?",
+        ].join("\n"),
+    [name],
+  );
+
+  return rows[0];
+}
+
+async function readQualifiedMigrationHistory(adapter, queryable, historyTable, name) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          `SELECT name, status FROM ${quoteQualifiedTable(adapter, historyTable)}`,
+          "WHERE name = $1",
+        ].join("\n")
+      : [
+          `SELECT name, status FROM ${quoteQualifiedTable(adapter, historyTable)}`,
+          "WHERE name = ?",
+        ].join("\n"),
+    [name],
+  );
+
+  return rows[0];
+}
+
+async function readQualifiedColumnNames(adapter, queryable, schemaName, tableName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          'SELECT column_name AS "columnName"',
+          "FROM information_schema.columns",
+          "WHERE table_schema = $1 AND table_name = $2",
+          "ORDER BY ordinal_position",
+        ].join("\n")
+      : [
+          "SELECT COLUMN_NAME AS columnName",
+          "FROM information_schema.columns",
+          "WHERE table_schema = ? AND table_name = ?",
+          "ORDER BY ORDINAL_POSITION",
+        ].join("\n"),
+    [schemaName, tableName],
+  );
+
+  return rows.map((row) => row.columnName);
+}
+
+async function tableExists(adapter, queryable, tableName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          "SELECT 1 AS exists",
+          "FROM information_schema.tables",
+          "WHERE table_schema = 'public' AND table_name = $1",
+        ].join("\n")
+      : [
+          "SELECT 1 AS `exists`",
+          "FROM information_schema.tables",
+          "WHERE table_schema = DATABASE() AND table_name = ?",
+        ].join("\n"),
+    [tableName],
+  );
+
+  return rows.length > 0;
+}
+
+async function dropSchema(adapter, queryable, schemaName) {
+  const schema = adapter.quoteIdentifier(schemaName);
+
+  await adapter.executeSql(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? `DROP SCHEMA IF EXISTS ${schema} CASCADE`
+      : `DROP DATABASE IF EXISTS ${schema}`,
+  );
+}
+
+function quoteQualifiedTable(adapter, identifier) {
+  return identifier
+    .split(".")
+    .map((part) => adapter.quoteIdentifier(part))
+    .join(".");
 }
 
 async function queryRows(queryable, sql, values) {

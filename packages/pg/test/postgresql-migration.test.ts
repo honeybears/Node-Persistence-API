@@ -49,7 +49,9 @@ describe("PostgreSQL migration compiler", () => {
           "  checksum TEXT NOT NULL,",
           "  adapter TEXT NOT NULL,",
           "  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),",
-          "  statement_count INTEGER NOT NULL",
+          "  statement_count INTEGER NOT NULL,",
+          "  status TEXT NOT NULL DEFAULT 'applied',",
+          "  error_message TEXT",
           ")",
         ].join("\n"),
         [
