@@ -878,7 +878,7 @@ before treating NPA as a fuller ORM:
 - Batching: add findUnique-style same-tick batching, relation-loading batching
   inside transaction-aware scopes, and backend batch insert/update execution for
   `saveAll`.
-- Entity mapping: add json/array types, embedded value objects, column
+- Entity mapping: add json types, embedded value objects, column
   transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks, drift detection, destructive-change
   safety controls, and richer DDL for defaults/generated columns.
