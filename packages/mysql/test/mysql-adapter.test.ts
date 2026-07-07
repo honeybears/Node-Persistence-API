@@ -47,6 +47,15 @@ class OrdinalTask {
   priority!: string;
 }
 
+@Entity({ name: "array_tasks" })
+class ArrayTask {
+  @Id()
+  id!: number;
+
+  @Column({ array: true })
+  tags!: string[];
+}
+
 abstract class ProductRepository extends NPARepository<Product, number> {
   repositoryName(): string {
     return "mysql-products";
@@ -669,6 +678,14 @@ describe("MySQL adapter", () => {
           "INSERT INTO `ordinal_tasks` (`id`, `priority`) VALUES (?, ?)",
         values: [1, 1],
       });
+    expect(compileMysqlInsert(
+        { id: 1, tags: ["new", "sale"] },
+        { entity: ArrayTask },
+      )).toEqual({
+        text:
+          "INSERT INTO `array_tasks` (`id`, `tags`) VALUES (?, ?)",
+        values: [1, "[\"new\",\"sale\"]"],
+      });
     expect(getMysqlPrimaryKeyValue(
         { id: 0, name: "desk" },
         { entity: GeneratedProduct },
@@ -691,6 +708,20 @@ describe("MySQL adapter", () => {
           "UPDATE `ordinal_tasks` SET `priority` = ? WHERE `id` = ?",
         values: [0, 1],
       });
+    expect(compileMysqlUpdate(
+        1,
+        { tags: ["clearance"] },
+        { entity: ArrayTask },
+      )).toEqual({
+        text:
+          "UPDATE `array_tasks` SET `tags` = ? WHERE `id` = ?",
+        values: ["[\"clearance\"]", 1],
+      });
+    expect(() =>
+        compileMysqlInsert(
+          { id: 1, tags: "new" as unknown as string[] },
+          { entity: ArrayTask },
+        )).toThrow(/requires an array value/);
     expect(() => compileMysqlUpdate(1, { id: 1 }, { entity: Product })).toThrow(/without changed values/);
     expect(() =>
         compileMysqlVersionedUpdate(

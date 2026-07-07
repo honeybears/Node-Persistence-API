@@ -119,7 +119,7 @@ export function normalizeMysqlPropertyValue(
 
   return relation
     ? readRelationForeignKeyValue(value, relation)
-    : normalizeColumnValue(findColumn(property, options), value);
+    : normalizeColumnValue(findColumn(property, options), value, { serializeArray: true });
 }
 
 export function normalizeMysqlPropertyValues(
@@ -130,7 +130,7 @@ export function normalizeMysqlPropertyValues(
   const relation = findOwningToOneRelation(property, options);
 
   if (!relation) {
-    return [normalizeColumnValue(findColumn(property, options), value)];
+    return [normalizeColumnValue(findColumn(property, options), value, { serializeArray: true })];
   }
 
   const normalized = readRelationForeignKeyValue(value, relation);

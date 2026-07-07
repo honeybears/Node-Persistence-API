@@ -143,6 +143,15 @@ class EnumUser {
   priority!: string;
 }
 
+@Entity({ name: "array_users" })
+class ArrayUser {
+  @Id()
+  id!: number;
+
+  @Column({ array: true })
+  tags!: string[];
+}
+
 describe("entity metadata", () => {
   describe("decorator metadata", () => {
     test("registers JPA-style entity metadata including relations", () => {
@@ -296,6 +305,16 @@ describe("entity metadata", () => {
         .toMatchObject({
           enumValues: ["LOW", "HIGH"],
           enumType: EnumType.ORDINAL,
+        });
+    });
+
+    test("registers array column metadata", () => {
+      const metadata = getEntityMetadata(ArrayUser);
+
+      expect(metadata.columns.find((column) => column.propertyName === "tags"))
+        .toMatchObject({
+          propertyName: "tags",
+          array: true,
         });
     });
 

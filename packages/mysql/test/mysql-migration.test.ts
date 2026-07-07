@@ -131,6 +131,45 @@ describe("MySQL migration compiler", () => {
     ].join("\n"));
   });
 
+  test("compiles TypeScript arrays as JSON columns", () => {
+    const statements = compileMysqlMigrationStatements({
+      entities: [{
+        ...userSchema,
+        columns: [
+          ...userSchema.columns,
+          {
+            propertyName: "tags",
+            columnName: "tags",
+            tsType: "string[]",
+            nullable: false,
+            primary: false,
+            version: false,
+            array: true,
+          },
+          {
+            propertyName: "scores",
+            columnName: "scores",
+            tsType: "Array<number>",
+            nullable: false,
+            primary: false,
+            version: false,
+            array: true,
+          },
+        ],
+      }],
+    });
+
+    expect(statements).toContain([
+      "CREATE TABLE IF NOT EXISTS `users` (",
+      "  `id` INT PRIMARY KEY,",
+      "  `email` VARCHAR(255) NOT NULL,",
+      "  `status` VARCHAR(255) NOT NULL,",
+      "  `tags` JSON NOT NULL,",
+      "  `scores` JSON NOT NULL",
+      ")",
+    ].join("\n"));
+  });
+
   test("compiles enum columns as STRING checks by default and native enums when requested", () => {
     const statements = compileMysqlMigrationStatements({
       entities: [{

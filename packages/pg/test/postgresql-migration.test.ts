@@ -135,6 +135,45 @@ describe("PostgreSQL migration compiler", () => {
     ].join("\n"));
   });
 
+  test("compiles TypeScript arrays as native PostgreSQL arrays", () => {
+    const statements = compilePostgresqlMigrationStatements({
+      entities: [{
+        ...userSchema,
+        columns: [
+          ...userSchema.columns,
+          {
+            propertyName: "tags",
+            columnName: "tags",
+            tsType: "string[]",
+            nullable: false,
+            primary: false,
+            version: false,
+            array: true,
+          },
+          {
+            propertyName: "scores",
+            columnName: "scores",
+            tsType: "Array<number>",
+            nullable: false,
+            primary: false,
+            version: false,
+            array: true,
+          },
+        ],
+      }],
+    });
+
+    expect(statements).toContain([
+      'CREATE TABLE IF NOT EXISTS "users" (',
+      '  "id" INTEGER PRIMARY KEY,',
+      '  "email" TEXT NOT NULL,',
+      '  "status" TEXT NOT NULL,',
+      '  "tags" TEXT[] NOT NULL,',
+      '  "scores" INTEGER[] NOT NULL',
+      ")",
+    ].join("\n"));
+  });
+
   test("compiles enum columns as STRING checks by default and native enums when requested", () => {
     const statements = compilePostgresqlMigrationStatements({
       entities: [{

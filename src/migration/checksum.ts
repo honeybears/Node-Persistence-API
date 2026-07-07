@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { normalizeTypeUnion } from "./helpers";
 import { MigrationAdapterName, MigrationEntitySchema } from "./types";
 
-export const MIGRATION_FORMAT_VERSION = "npa-migration-v6";
+export const MIGRATION_FORMAT_VERSION = "npa-migration-v7";
 
 export function createMigrationChecksum(
   adapter: MigrationAdapterName,
@@ -36,6 +36,7 @@ export function createMigrationSnapshot(
             enumValues: column.enumValues,
             enumType: column.enumType,
             enumName: column.enumName,
+            array: column.array,
             generationStrategy: column.generationStrategy,
             sequenceName: column.sequenceName,
             nullable: column.nullable,

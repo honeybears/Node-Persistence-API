@@ -12,6 +12,7 @@ import {
   MigrationRelationKind,
   MigrationRelationSchema,
 } from "./types";
+import { isArrayType } from "./helpers";
 
 interface DecoratorOptions {
   name?: string;
@@ -21,6 +22,7 @@ interface DecoratorOptions {
   enumValues?: string[];
   enumType?: MigrationEnumType;
   enumName?: string;
+  array?: boolean;
   generationStrategy?: MigrationGenerationStrategy;
   sequenceName?: string;
   nullable?: boolean;
@@ -169,6 +171,7 @@ function parseColumns(
         "enum",
         "enumType",
         "enumName",
+        "array",
         "generationStrategy",
         "sequenceName",
       ],
@@ -188,6 +191,7 @@ function parseColumns(
       ...(options.enumValues ? { enumValues: options.enumValues } : {}),
       ...(options.enumType ? { enumType: options.enumType } : {}),
       ...(options.enumName ? { enumName: options.enumName } : {}),
+      ...((options.array ?? isArrayType(tsType)) ? { array: true } : {}),
       ...((createdAt || updatedAt) && options.defaultValue === undefined
         ? { defaultCurrentTimestamp: true }
         : {}),
@@ -552,7 +556,7 @@ function parseDecoratorOptions(
 
     const rawPropertyValue = entry.slice(separatorIndex + 1).trim();
 
-    if (key === "nullable" || key === "orphanRemoval") {
+    if (key === "nullable" || key === "orphanRemoval" || key === "array") {
       if (rawPropertyValue !== "true" && rawPropertyValue !== "false") {
         throw schemaParseError(`${context}.${key} must be a boolean literal.`);
       }

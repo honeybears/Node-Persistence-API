@@ -23,6 +23,7 @@ import {
   normalizeTypeUnion as normalizeType,
   NPADatabaseError,
   NPAMigrationError,
+  readArrayElementType,
   sanitizeMigrationIdentifier as sanitizeIdentifier,
   shortenIdentifier,
   tableKey,
@@ -1033,6 +1034,7 @@ function defaultType(
   options: { identity: boolean },
 ): string {
   const normalized = normalizeType(column.tsType);
+  const arrayElementType = readArrayElementType(column.tsType);
 
   if (
     column.primary &&
@@ -1045,6 +1047,10 @@ function defaultType(
 
   if (column.primary && column.generationStrategy === "UUID") {
     return "UUID";
+  }
+
+  if (column.array || arrayElementType) {
+    return `${postgresqlArrayElementType(column, arrayElementType)}[]`;
   }
 
   if (normalized === "string") {
@@ -1076,6 +1082,45 @@ function defaultType(
     {
       code: "NPA_MIGRATION_UNSUPPORTED_DDL",
       details: { propertyName: column.propertyName, tsType: column.tsType },
+    },
+  );
+}
+
+function postgresqlArrayElementType(
+  column: MigrationColumnSchema,
+  arrayElementType: string | undefined,
+): string {
+  const normalized = normalizeType(arrayElementType ?? column.tsType);
+
+  if (normalized === "string") {
+    return "TEXT";
+  }
+
+  if (normalized === "number") {
+    return "INTEGER";
+  }
+
+  if (["bigint", "biginteger"].includes(normalized.toLowerCase())) {
+    return "BIGINT";
+  }
+
+  if (normalized === "boolean") {
+    return "BOOLEAN";
+  }
+
+  if (normalized === "Date") {
+    return "TIMESTAMPTZ";
+  }
+
+  throw new NPAMigrationError(
+    `Unsupported PostgreSQL array element type "${arrayElementType ?? column.tsType}" for ${column.propertyName}. Use @Column({ type: "..." }).`,
+    {
+      code: "NPA_MIGRATION_UNSUPPORTED_DDL",
+      details: {
+        propertyName: column.propertyName,
+        tsType: column.tsType,
+        arrayElementType: arrayElementType ?? column.tsType,
+      },
     },
   );
 }
@@ -1378,11 +1423,19 @@ function currentPostgresqlType(row: PostgresqlColumnRow): string {
     return row.udtName;
   }
 
+  if (row.dataType === "ARRAY") {
+    return `${postgresqlArrayElementTypeFromUdt(row.udtName)}[]`;
+  }
+
   if (row.dataType === "character varying" && row.characterMaximumLength) {
     return `character varying(${row.characterMaximumLength})`;
   }
 
   return row.dataType;
+}
+
+function postgresqlArrayElementTypeFromUdt(udtName: string): string {
+  return normalizePostgresqlTypeName(udtName.replace(/^_/, ""));
 }
 
 
@@ -1738,6 +1791,11 @@ function qualifiedTable(table: Pick<MigrationTableSchema, "schema" | "tableName"
 
 function normalizePostgresqlTypeName(value: string): string {
   const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
+
+  if (normalized.endsWith("[]")) {
+    return `${normalizePostgresqlTypeName(normalized.slice(0, -2))}[]`;
+  }
+
   const varcharMatch = /^varchar\((\d+)\)$/.exec(normalized);
 
   if (varcharMatch) {

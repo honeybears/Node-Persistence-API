@@ -19,6 +19,7 @@ export interface ColumnOptions {
   enum?: readonly string[] | Record<string, string | number>;
   enumType?: EnumType | `${EnumType}`;
   enumName?: string;
+  array?: boolean;
   generationStrategy?: GenerationStrategy | `${GenerationStrategy}`;
   sequenceName?: string;
 }
@@ -90,6 +91,7 @@ export interface ColumnMetadata {
   enumValues?: string[];
   enumType?: EnumType | `${EnumType}`;
   enumName?: string;
+  array?: boolean;
   generationStrategy?: GenerationStrategy | `${GenerationStrategy}`;
   sequenceName?: string;
   primary: boolean;

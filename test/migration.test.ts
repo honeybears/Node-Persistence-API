@@ -318,6 +318,44 @@ describe("migration metadata", () => {
       });
   });
 
+  test("parses array column metadata from TypeScript arrays and explicit options", () => {
+    const [schema] = parseEntitySource(`
+  @Entity({ name: "products" })
+  export class Product {
+    @Id()
+    id?: number;
+
+    @Column()
+    tags!: string[];
+
+    @Column()
+    scores!: Array<number>;
+
+    @Column({ array: true })
+    flags!: boolean;
+  }
+  `);
+
+    expect(schema.columns.find((column) => column.propertyName === "tags"))
+      .toMatchObject({
+        propertyName: "tags",
+        tsType: "string[]",
+        array: true,
+      });
+    expect(schema.columns.find((column) => column.propertyName === "scores"))
+      .toMatchObject({
+        propertyName: "scores",
+        tsType: "Array<number>",
+        array: true,
+      });
+    expect(schema.columns.find((column) => column.propertyName === "flags"))
+      .toMatchObject({
+        propertyName: "flags",
+        tsType: "boolean",
+        array: true,
+      });
+  });
+
   test("parses explicit id generation strategy metadata", () => {
     const [schema] = parseEntitySource(`
   @Entity({ name: "events" })

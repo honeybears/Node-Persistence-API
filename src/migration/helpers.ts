@@ -81,6 +81,23 @@ export function normalizeTypeUnion(value: string): string {
     .join(" | ");
 }
 
+export function readArrayElementType(value: string): string | undefined {
+  const normalized = normalizeTypeUnion(value).trim();
+  const arrayMatch = /^(.+)\[\]$/.exec(normalized);
+
+  if (arrayMatch) {
+    return normalizeTypeUnion(arrayMatch[1]).trim();
+  }
+
+  const genericMatch = /^(?:Array|ReadonlyArray)<(.+)>$/.exec(normalized);
+
+  return genericMatch ? normalizeTypeUnion(genericMatch[1]).trim() : undefined;
+}
+
+export function isArrayType(value: string): boolean {
+  return readArrayElementType(value) !== undefined;
+}
+
 export function importDriver<TDriver>(specifier: string): Promise<TDriver> {
   const dynamicImport = new Function(
     "specifier",

@@ -236,6 +236,7 @@ function createColumnMetadata(
       : {}),
     ...(options.enumType !== undefined ? { enumType: options.enumType } : {}),
     ...(options.enumName !== undefined ? { enumName: options.enumName } : {}),
+    ...(options.array !== undefined ? { array: options.array } : {}),
     ...(options.generationStrategy !== undefined
       ? { generationStrategy: options.generationStrategy }
       : {}),

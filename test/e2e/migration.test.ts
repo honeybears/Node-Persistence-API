@@ -236,28 +236,34 @@ describe("migration E2E", () => {
         expectCliSuccess(pushed);
 
         queryable = await adapter.createQueryable(container);
+        const tagsValue = adapter.adapterName === "postgresql"
+          ? "ARRAY['fragile', 'new']"
+          : "JSON_ARRAY('fragile', 'new')";
+        const scoresValue = adapter.adapterName === "postgresql"
+          ? "ARRAY[1, 2]"
+          : "JSON_ARRAY(1, 2)";
         await adapter.executeSql(
           queryable,
           [
             `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
-            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
-            "VALUES ('ACTIVE', 'ADMIN', 1)",
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")}, ${adapter.quoteIdentifier("tags")}, ${adapter.quoteIdentifier("scores")})`,
+            `VALUES ('ACTIVE', 'ADMIN', 1, ${tagsValue}, ${scoresValue})`,
           ].join(" "),
         );
         await expect(adapter.executeSql(
           queryable,
           [
             `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
-            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
-            "VALUES ('DELETED', 'ADMIN', 1)",
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")}, ${adapter.quoteIdentifier("tags")}, ${adapter.quoteIdentifier("scores")})`,
+            `VALUES ('DELETED', 'ADMIN', 1, ${tagsValue}, ${scoresValue})`,
           ].join(" "),
         )).rejects.toThrow();
         await expect(adapter.executeSql(
           queryable,
           [
             `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
-            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
-            "VALUES ('ACTIVE', 'ADMIN', 9)",
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")}, ${adapter.quoteIdentifier("tags")}, ${adapter.quoteIdentifier("scores")})`,
+            `VALUES ('ACTIVE', 'ADMIN', 9, ${tagsValue}, ${scoresValue})`,
           ].join(" "),
         )).rejects.toThrow();
 
@@ -273,13 +279,29 @@ describe("migration E2E", () => {
           tableName,
           "priority",
         );
+        const tagsType = await readColumnDbType(
+          adapter,
+          queryable,
+          tableName,
+          "tags",
+        );
+        const scoresType = await readColumnDbType(
+          adapter,
+          queryable,
+          tableName,
+          "scores",
+        );
 
         if (adapter.adapterName === "postgresql") {
           expect(roleType).toEqual(roleTypeName);
           expect(priorityType).toEqual("integer");
+          expect(tagsType).toEqual("_text");
+          expect(scoresType).toEqual("_int4");
         } else {
           expect(roleType).toMatch(/^enum\('ADMIN','USER'\)$/i);
           expect(priorityType).toEqual("int");
+          expect(tagsType).toEqual("json");
+          expect(scoresType).toEqual("json");
         }
       } finally {
         try {
@@ -1179,6 +1201,12 @@ export class EnumProduct {
 
   @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
   priority!: string;
+
+  @Column()
+  tags!: string[];
+
+  @Column()
+  scores!: number[];
 }
 `,
     "utf8",
@@ -1440,7 +1468,7 @@ async function readColumnDbType(adapter, queryable, tableName, columnName) {
     queryable,
     adapter.adapterName === "postgresql"
       ? [
-          'SELECT CASE WHEN data_type = \'USER-DEFINED\' THEN udt_name ELSE data_type END AS "dbType"',
+          'SELECT CASE WHEN data_type IN (\'USER-DEFINED\', \'ARRAY\') THEN udt_name ELSE data_type END AS "dbType"',
           "FROM information_schema.columns",
           "WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
         ].join("\n")

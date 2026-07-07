@@ -16,6 +16,7 @@ export interface MigrationColumnSchema {
   enumValues?: string[];
   enumType?: MigrationEnumType;
   enumName?: string;
+  array?: boolean;
   generationStrategy?: MigrationGenerationStrategy;
   sequenceName?: string;
   nullable: boolean;

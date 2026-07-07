@@ -134,7 +134,11 @@ database `CHECK` constraint. Use `enumType: EnumType.ORDINAL` to store zero-base
 integer ordinals, or `enumType: EnumType.NATIVE` when the database should use a
 native enum type instead; PostgreSQL can also set `enumName` for the generated
 type name. Migration parsing supports literal string arrays and enums declared
-in the same entity file.
+in the same entity file. TypeScript array fields such as `tags!: string[]` or
+`scores!: Array<number>` are mapped as array columns in migrations. PostgreSQL
+uses native array types, while MySQL stores them as `JSON`; use
+`@Column({ array: true })` when runtime repository writes need array value
+validation and adapter-specific serialization.
 `@Index` with property names in `columns` for composite indexes. Pass an array
 to `@Index` to declare multiple indexes, and set `unique: true` for composite
 unique indexes. `@Column({ index: true })` and

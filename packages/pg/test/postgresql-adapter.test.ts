@@ -92,6 +92,15 @@ class PgOrdinalTask {
   priority!: string;
 }
 
+@Entity({ name: "array_tasks" })
+class PgArrayTask {
+  @Id()
+  id!: number;
+
+  @Column({ array: true })
+  tags!: string[];
+}
+
 @Entity({ name: "tenant_users" })
 class PgTenantUser {
   @Id({ name: "tenant_id" })
@@ -987,6 +996,15 @@ describe("PostgreSQL adapter", () => {
       values: [1, 1],
     });
     expect(
+      compilePostgresqlInsert(
+        { id: 1, tags: ["new", "sale"] },
+        { entity: PgArrayTask },
+      ),
+    ).toEqual({
+      text: 'INSERT INTO "array_tasks" ("id", "tags") VALUES ($1, $2) RETURNING *',
+      values: [1, ["new", "sale"]],
+    });
+    expect(
       getPrimaryKeyValue(
         { id: 0, name: "desk" },
         { entity: PgGeneratedProduct },
@@ -1008,6 +1026,21 @@ describe("PostgreSQL adapter", () => {
       text: 'UPDATE "ordinal_tasks" SET "priority" = $1 WHERE "id" = $2 RETURNING *',
       values: [0, 1],
     });
+    expect(
+      compilePostgresqlUpdate(
+        1,
+        { tags: ["clearance"] },
+        { entity: PgArrayTask },
+      ),
+    ).toEqual({
+      text: 'UPDATE "array_tasks" SET "tags" = $1 WHERE "id" = $2 RETURNING *',
+      values: [["clearance"], 1],
+    });
+    expect(() =>
+        compilePostgresqlInsert(
+          { id: 1, tags: "new" as unknown as string[] },
+          { entity: PgArrayTask },
+        )).toThrow(/requires an array value/);
     expect(() => compilePostgresqlUpdate(1, { id: 1 }, options)).toThrow(
       /without changed values/,
     );

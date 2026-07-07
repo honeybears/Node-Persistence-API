@@ -23,6 +23,7 @@ import {
   normalizeTypeUnion as normalizeType,
   NPADatabaseError,
   NPAMigrationError,
+  readArrayElementType,
   sanitizeMigrationIdentifier as sanitizeIdentifier,
   shortenIdentifier,
   tableKey,
@@ -936,6 +937,7 @@ function defaultType(
   options: { identity: boolean },
 ): string {
   const normalized = normalizeType(column.tsType);
+  const arrayElementType = readArrayElementType(column.tsType);
 
   if (
     column.primary &&
@@ -948,6 +950,10 @@ function defaultType(
 
   if (column.primary && column.generationStrategy === "UUID") {
     return "CHAR(36)";
+  }
+
+  if (column.array || arrayElementType) {
+    return "JSON";
   }
 
   if (normalized === "string") {
