@@ -1593,7 +1593,7 @@ describe("MySQL adapter", () => {
     ]);
   });
 
-  test("uses optimistic MySQL updateById SQL only for versioned entities", async () => {
+  test("uses optimistic MySQL update SQL only for versioned saves", async () => {
     const calls = [];
     const queryable = {
       async query(text, values) {

@@ -1335,7 +1335,7 @@ describe("PostgreSQL adapter", () => {
     ).toThrow(/uses named parameter/);
   });
 
-  test("runs save, insert, updateById, and deleteById through a PostgreSQL queryable", async () => {
+  test("runs repository save and delete operations through a PostgreSQL queryable", async () => {
     const calls = [];
     const queryable = {
       async query(text, values) {
@@ -1735,7 +1735,7 @@ describe("PostgreSQL adapter", () => {
     ]);
   });
 
-  test("uses optimistic PostgreSQL updateById SQL only for versioned entities", async () => {
+  test("uses optimistic PostgreSQL update SQL only for versioned saves", async () => {
     const calls = [];
     const queryable = {
       async query(text, values) {
