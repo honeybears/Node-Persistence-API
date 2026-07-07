@@ -231,6 +231,11 @@ function createColumnMetadata(
     nullable: options.nullable ?? false,
     type: options.type,
     ...(options.default !== undefined ? { default: options.default } : {}),
+    ...(options.enum !== undefined
+      ? { enumValues: normalizeEnumValues(options.enum) }
+      : {}),
+    ...(options.enumType !== undefined ? { enumType: options.enumType } : {}),
+    ...(options.enumName !== undefined ? { enumName: options.enumName } : {}),
     ...(options.generationStrategy !== undefined
       ? { generationStrategy: options.generationStrategy }
       : {}),
@@ -239,6 +244,24 @@ function createColumnMetadata(
       : {}),
     ...flags,
   };
+}
+
+function normalizeEnumValues(
+  value: NonNullable<ColumnOptions["enum"]>,
+): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : Object.values(value).filter((entry): entry is string => typeof entry === "string");
+
+  const unique = [...new Set(values)];
+
+  if (unique.length === 0) {
+    throw new NPAMetadataError("@Column({ enum }) requires at least one string enum value.", {
+      code: "NPA_INVALID_DECORATOR_OPTIONS",
+    });
+  }
+
+  return unique;
 }
 
 function registerColumnIndexOptions(

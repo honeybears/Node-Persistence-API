@@ -2,6 +2,7 @@ import {
   ColumnMetadata,
   EntityMetadata,
   getOptionalEntityMetadata,
+  normalizeColumnValue,
   NPADatabaseError,
   NPAMetadataError,
   primaryColumnsOf,
@@ -116,7 +117,9 @@ export function normalizeMysqlPropertyValue(
     (candidate) => isOwningToOneRelation(candidate) && candidate.propertyName === property,
   );
 
-  return relation ? readRelationForeignKeyValue(value, relation) : value;
+  return relation
+    ? readRelationForeignKeyValue(value, relation)
+    : normalizeColumnValue(findColumn(property, options), value);
 }
 
 export function normalizeMysqlPropertyValues(
@@ -127,7 +130,7 @@ export function normalizeMysqlPropertyValues(
   const relation = findOwningToOneRelation(property, options);
 
   if (!relation) {
-    return [value];
+    return [normalizeColumnValue(findColumn(property, options), value)];
   }
 
   const normalized = readRelationForeignKeyValue(value, relation);

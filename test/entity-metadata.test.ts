@@ -4,6 +4,7 @@ import {
   Column,
   CreatedAt,
   Entity,
+  EnumType,
   FetchType,
   GenerationStrategy,
   Id,
@@ -120,6 +121,26 @@ class TenantUser {
 
   @Column()
   name!: string;
+}
+
+enum UserStatus {
+  ACTIVE = "ACTIVE",
+  BLOCKED = "BLOCKED",
+}
+
+@Entity({ name: "enum_users" })
+class EnumUser {
+  @Id()
+  id!: number;
+
+  @Column({ enum: UserStatus })
+  status!: UserStatus;
+
+  @Column({ enum: ["ADMIN", "USER"], enumType: EnumType.NATIVE, enumName: "user_role" })
+  role!: string;
+
+  @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
+  priority!: string;
 }
 
 describe("entity metadata", () => {
@@ -256,6 +277,26 @@ describe("entity metadata", () => {
         propertyName: "id",
         generationStrategy: GenerationStrategy.UUID,
       });
+    });
+
+    test("registers enum column metadata", () => {
+      const metadata = getEntityMetadata(EnumUser);
+
+      expect(metadata.columns.find((column) => column.propertyName === "status"))
+        .toMatchObject({
+          enumValues: ["ACTIVE", "BLOCKED"],
+        });
+      expect(metadata.columns.find((column) => column.propertyName === "role"))
+        .toMatchObject({
+          enumValues: ["ADMIN", "USER"],
+          enumType: EnumType.NATIVE,
+          enumName: "user_role",
+        });
+      expect(metadata.columns.find((column) => column.propertyName === "priority"))
+        .toMatchObject({
+          enumValues: ["LOW", "HIGH"],
+          enumType: EnumType.ORDINAL,
+        });
     });
 
     test("registers one-to-one and composite primary key metadata", () => {

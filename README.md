@@ -71,6 +71,7 @@ import {
   CreatedAt,
   CascadeType,
   Entity,
+  EnumType,
   FetchType,
   Id,
   Index,
@@ -128,6 +129,12 @@ Use `@CreatedAt` and `@UpdatedAt` for timestamp columns; migrations default them
 to the current timestamp, and updates refresh `@UpdatedAt`. Use `@Version` for
 an optimistic lock column. Inserts default it to `0`; managed
 entity dirty flushes check the previous value and increment it. Use class-level
+`@Column({ enum: ['ACTIVE', 'BLOCKED'] })` to store string enum values with a
+database `CHECK` constraint. Use `enumType: EnumType.ORDINAL` to store zero-based
+integer ordinals, or `enumType: EnumType.NATIVE` when the database should use a
+native enum type instead; PostgreSQL can also set `enumName` for the generated
+type name. Migration parsing supports literal string arrays and enums declared
+in the same entity file.
 `@Index` with property names in `columns` for composite indexes. Pass an array
 to `@Index` to declare multiple indexes, and set `unique: true` for composite
 unique indexes. `@Column({ index: true })` and
@@ -867,10 +874,10 @@ before treating NPA as a fuller ORM:
 - Batching: add findUnique-style same-tick batching, relation-loading batching
   inside transaction-aware scopes, and backend batch insert/update execution for
   `saveAll`.
-- Entity mapping: add enum/json/array types, embedded value objects, column
+- Entity mapping: add json/array types, embedded value objects, column
   transformers, inheritance, and lifecycle hooks.
 - Migrations: add data migration hooks, drift detection, destructive-change
-  safety controls, and richer DDL for defaults/generated columns/enums.
+  safety controls, and richer DDL for defaults/generated columns.
 - Transactions: add additional propagation modes and clearer guidance for
   connection ownership across multiple `NPA` instances.
 - Operations: add metrics/tracing integrations, retry policy hooks, and

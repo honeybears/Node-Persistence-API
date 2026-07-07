@@ -274,6 +274,50 @@ describe("migration metadata", () => {
     });
   });
 
+  test("parses enum column metadata", () => {
+    const [schema] = parseEntitySource(`
+  enum UserStatus {
+    ACTIVE = "ACTIVE",
+    BLOCKED = "BLOCKED",
+  }
+
+  @Entity({ name: "users" })
+  export class User {
+    @Id()
+    id?: number;
+
+    @Column({ enum: UserStatus })
+    status!: UserStatus;
+
+    @Column({ enum: ["ADMIN", "USER"], enumType: EnumType.NATIVE, enumName: "user_role" })
+    role!: string;
+
+    @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
+    priority!: string;
+  }
+  `);
+
+    expect(schema.columns.find((column) => column.propertyName === "status"))
+      .toMatchObject({
+        propertyName: "status",
+        tsType: "UserStatus",
+        enumValues: ["ACTIVE", "BLOCKED"],
+      });
+    expect(schema.columns.find((column) => column.propertyName === "role"))
+      .toMatchObject({
+        propertyName: "role",
+        enumValues: ["ADMIN", "USER"],
+        enumType: "NATIVE",
+        enumName: "user_role",
+      });
+    expect(schema.columns.find((column) => column.propertyName === "priority"))
+      .toMatchObject({
+        propertyName: "priority",
+        enumValues: ["LOW", "HIGH"],
+        enumType: "ORDINAL",
+      });
+  });
+
   test("parses explicit id generation strategy metadata", () => {
     const [schema] = parseEntitySource(`
   @Entity({ name: "events" })
@@ -881,18 +925,29 @@ describe("migration metadata", () => {
 
   test("creates best-effort down migration statements", () => {
     expect(createDownMigrationStatements("postgresql", [
+      [
+        "DO $$ BEGIN",
+        "  CREATE TYPE \"user_role\" AS ENUM ('ADMIN', 'USER');",
+        "EXCEPTION WHEN duplicate_object THEN NULL;",
+        "END $$",
+      ].join("\n"),
       'CREATE TABLE IF NOT EXISTS "products" ("id" INTEGER PRIMARY KEY)',
       'ALTER TABLE "products" ADD COLUMN "name" TEXT',
+      'ALTER TABLE "products" ADD CONSTRAINT "chk_products_name_enum_00000001" CHECK ("name" IN (\'ACTIVE\'))',
       'ALTER TABLE "products" RENAME COLUMN "name" TO "display_name"',
     ])).toEqual([
       'ALTER TABLE "products" RENAME COLUMN "display_name" TO "name"',
+      'ALTER TABLE "products" DROP CONSTRAINT "chk_products_name_enum_00000001"',
       'ALTER TABLE "products" DROP COLUMN "name"',
       'DROP TABLE IF EXISTS "products"',
+      'DROP TYPE IF EXISTS "user_role"',
     ]);
 
     expect(createDownMigrationStatements("mysql", [
       "CREATE INDEX `idx_products_name` ON `products` (`name`)",
+      "ALTER TABLE `products` ADD CONSTRAINT `chk_products_name_enum_00000001` CHECK (`name` IN ('ACTIVE'))",
     ])).toEqual([
+      "ALTER TABLE `products` DROP CHECK `chk_products_name_enum_00000001`",
       "DROP INDEX `idx_products_name` ON `products`",
     ]);
   });

@@ -18,10 +18,12 @@ function invertMigrationStatement(
 
   return (
     invertCreateTable(normalized) ??
+    invertCreatePostgresqlEnumType(adapter, normalized) ??
     invertCreateIndex(adapter, normalized) ??
     invertAddColumn(normalized) ??
     invertRenameColumn(normalized) ??
     invertRenameTable(adapter, normalized) ??
+    invertAddCheckConstraint(adapter, normalized) ??
     invertAddForeignKey(adapter, normalized)
   );
 }
@@ -30,6 +32,19 @@ function invertCreateTable(statement: string): string | undefined {
   const match = /^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(.+?)\s*\(/is.exec(statement);
 
   return match ? `DROP TABLE IF EXISTS ${match[1].trim()}` : undefined;
+}
+
+function invertCreatePostgresqlEnumType(
+  adapter: MigrationAdapterName,
+  statement: string,
+): string | undefined {
+  if (adapter !== "postgresql") {
+    return undefined;
+  }
+
+  const match = /\bCREATE\s+TYPE\s+(.+?)\s+AS\s+ENUM\s*\(/is.exec(statement);
+
+  return match ? `DROP TYPE IF EXISTS ${match[1].trim()}` : undefined;
 }
 
 function invertCreateIndex(
@@ -83,6 +98,21 @@ function invertRenameTable(
   return match
     ? `ALTER TABLE ${replaceLastIdentifier(match[1].trim(), match[2].trim())} RENAME TO ${lastIdentifier(match[1].trim())}`
     : undefined;
+}
+
+function invertAddCheckConstraint(
+  adapter: MigrationAdapterName,
+  statement: string,
+): string | undefined {
+  const match = /^ALTER\s+TABLE\s+(.+?)\s+ADD\s+CONSTRAINT\s+(.+?)\s+CHECK\b/is.exec(statement);
+
+  if (!match) {
+    return undefined;
+  }
+
+  return adapter === "mysql"
+    ? `ALTER TABLE ${match[1].trim()} DROP CHECK ${match[2].trim()}`
+    : `ALTER TABLE ${match[1].trim()} DROP CONSTRAINT ${match[2].trim()}`;
 }
 
 function invertAddForeignKey(

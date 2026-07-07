@@ -1,4 +1,4 @@
-import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, FetchType, Id, Loaded, ManyToMany, ManyToOne, NPADatabaseError, NPARepository, OneToOne, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
+import { AbstractTransactionManager, Column, CreatedAt, Entity, EntityGraph, EnumType, FetchType, Id, Loaded, ManyToMany, ManyToOne, NPADatabaseError, NPARepository, OneToOne, OneToMany, Pageable, Query, Repository, UpdatedAt, Version, createNPA, defineEntityGraph, parseQueryMethod } from "../../../src";
 import { compileMysqlCount, compileMysqlDeleteAll, compileMysqlDeleteById, compileMysqlExistsById, compileMysqlFindAll, compileMysqlInsert, compileMysqlQuery, compileMysqlRawQuery, compileMysqlUpdate, compileMysqlVersionedUpdate, compileMysqlFindById, createMysqlDerivedQueryRepository, getMysqlPrimaryKeyValue, MysqlConnection, mysql, type MysqlDriverConnection, type MysqlQueryable } from "../src";
 import { describe, expect, test } from "@jest/globals";
 
@@ -36,6 +36,15 @@ class GeneratedProduct {
 
   @Column({ name: "product_name" })
   name!: string;
+}
+
+@Entity({ name: "ordinal_tasks" })
+class OrdinalTask {
+  @Id()
+  id!: number;
+
+  @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
+  priority!: string;
 }
 
 abstract class ProductRepository extends NPARepository<Product, number> {
@@ -326,6 +335,16 @@ describe("MySQL adapter", () => {
         text:
           "SELECT * FROM `shop`.`products` WHERE (`product_name` = ?) OR (`price` > ? AND `active` IS TRUE)",
         values: ["desk", 100],
+      });
+    expect(compileMysqlQuery(
+        {
+          query: parseQueryMethod("findByPriority"),
+          args: ["HIGH"],
+        },
+        { entity: OrdinalTask },
+      )).toEqual({
+        text: "SELECT * FROM `ordinal_tasks` WHERE (`priority` = ?)",
+        values: [1],
       });
   });
 
@@ -642,6 +661,14 @@ describe("MySQL adapter", () => {
           "INSERT INTO `shop`.`generated_products` (`product_name`) VALUES (?)",
         values: ["desk"],
       });
+    expect(compileMysqlInsert(
+        { id: 1, priority: "HIGH" },
+        { entity: OrdinalTask },
+      )).toEqual({
+        text:
+          "INSERT INTO `ordinal_tasks` (`id`, `priority`) VALUES (?, ?)",
+        values: [1, 1],
+      });
     expect(getMysqlPrimaryKeyValue(
         { id: 0, name: "desk" },
         { entity: GeneratedProduct },
@@ -654,6 +681,15 @@ describe("MySQL adapter", () => {
         text:
           "UPDATE `shop`.`products` SET `product_name` = ?, `created_at` = ? WHERE `product_id` = ?",
         values: ["chair", 11, 1],
+      });
+    expect(compileMysqlUpdate(
+        1,
+        { priority: "LOW" },
+        { entity: OrdinalTask },
+      )).toEqual({
+        text:
+          "UPDATE `ordinal_tasks` SET `priority` = ? WHERE `id` = ?",
+        values: [0, 1],
       });
     expect(() => compileMysqlUpdate(1, { id: 1 }, { entity: Product })).toThrow(/without changed values/);
     expect(() =>

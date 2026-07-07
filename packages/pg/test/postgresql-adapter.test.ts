@@ -23,6 +23,7 @@ import {
   CreatedAt,
   Entity,
   EntityGraph,
+  EnumType,
   FetchType,
   Id,
   Loaded,
@@ -80,6 +81,15 @@ class PgGeneratedProduct {
 
   @Column({ name: "product_name" })
   name!: string;
+}
+
+@Entity({ name: "ordinal_tasks" })
+class PgOrdinalTask {
+  @Id()
+  id!: number;
+
+  @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
+  priority!: string;
 }
 
 @Entity({ name: "tenant_users" })
@@ -352,6 +362,18 @@ describe("PostgreSQL adapter", () => {
     ).toEqual({
       text: 'SELECT DISTINCT * FROM "users" WHERE (LOWER("name") LIKE $1 AND LOWER("email") = $2) ORDER BY "name" ASC, "age" DESC LIMIT 2',
       values: ["%kim%", "a@example.com"],
+    });
+    expect(
+      compilePostgresqlQuery(
+        {
+          query: parseQueryMethod("findByPriority"),
+          args: ["HIGH"],
+        },
+        { entity: PgOrdinalTask },
+      ),
+    ).toEqual({
+      text: 'SELECT * FROM "ordinal_tasks" WHERE ("priority" = $1)',
+      values: [1],
     });
   });
 
@@ -956,6 +978,15 @@ describe("PostgreSQL adapter", () => {
       values: ["desk"],
     });
     expect(
+      compilePostgresqlInsert(
+        { id: 1, priority: "HIGH" },
+        { entity: PgOrdinalTask },
+      ),
+    ).toEqual({
+      text: 'INSERT INTO "ordinal_tasks" ("id", "priority") VALUES ($1, $2) RETURNING *',
+      values: [1, 1],
+    });
+    expect(
       getPrimaryKeyValue(
         { id: 0, name: "desk" },
         { entity: PgGeneratedProduct },
@@ -966,6 +997,16 @@ describe("PostgreSQL adapter", () => {
     ).toEqual({
       text: 'UPDATE "users" SET "name" = $1, "created_at" = $2 WHERE "id" = $3 RETURNING *',
       values: ["lee", 4, 1],
+    });
+    expect(
+      compilePostgresqlUpdate(
+        1,
+        { priority: "LOW" },
+        { entity: PgOrdinalTask },
+      ),
+    ).toEqual({
+      text: 'UPDATE "ordinal_tasks" SET "priority" = $1 WHERE "id" = $2 RETURNING *',
+      values: [0, 1],
     });
     expect(() => compilePostgresqlUpdate(1, { id: 1 }, options)).toThrow(
       /without changed values/,

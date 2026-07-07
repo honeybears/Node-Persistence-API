@@ -24,6 +24,7 @@ import {
   NPADatabaseError,
   NPAMigrationError,
   sanitizeMigrationIdentifier as sanitizeIdentifier,
+  shortenIdentifier,
   tableKey,
   toSnakeCase,
 } from "@node-persistence-api/core";
@@ -76,11 +77,16 @@ interface CurrentForeignKeySchema {
   referencedColumns: string[];
 }
 
+interface CurrentCheckConstraintSchema {
+  name: string;
+}
+
 interface CurrentTableSchema {
   exists: boolean;
   columns: Map<string, CurrentColumnSchema>;
   indexes: Map<string, CurrentIndexSchema>;
   foreignKeys: Map<string, CurrentForeignKeySchema>;
+  checkConstraints: Map<string, CurrentCheckConstraintSchema>;
 }
 
 interface MysqlColumnRow {
@@ -104,6 +110,10 @@ interface MysqlForeignKeyRow {
   referencedTable: string;
   referencedColumn: string;
   position: number;
+}
+
+interface MysqlCheckConstraintRow {
+  constraintName: string;
 }
 
 interface MysqlHistoryRow {
@@ -505,6 +515,12 @@ function compileMysqlTableDiffStatements(
     }
 
     statements.push(...compileMysqlIndexDiffStatements(table, currentTable.indexes));
+    statements.push(
+      ...compileMysqlCheckConstraintDiffStatements(
+        table,
+        currentTable.checkConstraints,
+      ),
+    );
     foreignKeyStatements.push(
       ...compileMysqlForeignKeyDiffStatements(table, currentTable.foreignKeys),
     );
@@ -648,6 +664,39 @@ function compileMysqlIndexDiffStatements(
   return statements;
 }
 
+function compileMysqlCheckConstraintDiffStatements(
+  table: MigrationTableSchema,
+  currentChecks: Map<string, CurrentCheckConstraintSchema>,
+): string[] {
+  const statements: string[] = [];
+  const desiredChecks = desiredEnumCheckConstraints(table);
+  const desiredNames = new Set(desiredChecks.map((check) => check.name));
+  const prefixes = table.columns.map((column) =>
+    enumCheckConstraintPrefix(table, column),
+  );
+
+  for (const current of [...currentChecks.values()].sort(compareByName)) {
+    if (
+      prefixes.some((prefix) => current.name.startsWith(`${prefix}_`)) &&
+      !desiredNames.has(current.name)
+    ) {
+      statements.push(
+        `ALTER TABLE ${qualifiedTable(table)} DROP CHECK ${quoteQualifiedIdentifier(current.name)}`,
+      );
+    }
+  }
+
+  for (const check of desiredChecks) {
+    if (!currentChecks.has(check.name)) {
+      statements.push(
+        `ALTER TABLE ${qualifiedTable(table)} ADD ${compileMysqlCheckConstraint(check)}`,
+      );
+    }
+  }
+
+  return statements;
+}
+
 function compileMysqlCreateTable(table: MigrationTableSchema): string {
   const columnLines = table.columns.map(
     (column) => `  ${quoteQualifiedIdentifier(column.columnName)} ${columnDefinition(column, { inlinePrimary: !table.primaryKey })}`,
@@ -655,10 +704,13 @@ function compileMysqlCreateTable(table: MigrationTableSchema): string {
   const primaryKeyLines = table.primaryKey?.length
     ? [`  PRIMARY KEY (${table.primaryKey.map(quoteQualifiedIdentifier).join(", ")})`]
     : [];
+  const checkLines = desiredEnumCheckConstraints(table).map(
+    (check) => `  ${compileMysqlCheckConstraint(check)}`,
+  );
 
   return [
     `CREATE TABLE IF NOT EXISTS ${qualifiedTable(table)} (`,
-    [...columnLines, ...primaryKeyLines].join(",\n"),
+    [...columnLines, ...primaryKeyLines, ...checkLines].join(",\n"),
     ")",
   ].join("\n");
 }
@@ -675,6 +727,80 @@ function compileMysqlForeignKeyConstraint(
   ].filter(Boolean).join(" ");
 }
 
+function compileMysqlCheckConstraint(
+  check: { name: string; column: MigrationColumnSchema },
+): string {
+  return [
+    `CONSTRAINT ${quoteQualifiedIdentifier(check.name)}`,
+    `CHECK (${quoteQualifiedIdentifier(check.column.columnName)} IN (${enumCheckLiterals(check.column)}))`,
+  ].join(" ");
+}
+
+function desiredEnumCheckConstraints(
+  table: MigrationTableSchema,
+): Array<{ name: string; column: MigrationColumnSchema }> {
+  return table.columns
+    .filter((column) => column.enumValues?.length && !isNativeEnumColumn(column))
+    .map((column) => ({
+      name: enumCheckConstraintName(table, column),
+      column,
+    }))
+    .sort(compareByName);
+}
+
+function enumCheckConstraintPrefix(
+  table: MigrationTableSchema,
+  column: MigrationColumnSchema,
+): string {
+  return shortenIdentifier(
+    sanitizeIdentifier(`chk_${table.tableName}_${column.columnName}_enum`),
+    MAX_FOREIGN_KEY_IDENTIFIER_LENGTH - 9,
+  );
+}
+
+function enumCheckConstraintName(
+  table: MigrationTableSchema,
+  column: MigrationColumnSchema,
+): string {
+  return shortenIdentifier(
+    `${enumCheckConstraintPrefix(table, column)}_${enumValuesHash([
+      column.enumType ?? "STRING",
+      ...(column.enumValues ?? []),
+    ])}`,
+    MAX_FOREIGN_KEY_IDENTIFIER_LENGTH,
+  );
+}
+
+function isNativeEnumColumn(column: MigrationColumnSchema): boolean {
+  return !!column.enumValues?.length && column.enumType === "NATIVE";
+}
+
+function isOrdinalEnumColumn(column: MigrationColumnSchema): boolean {
+  return !!column.enumValues?.length && column.enumType === "ORDINAL";
+}
+
+function enumSqlLiterals(values: string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", ");
+}
+
+function enumCheckLiterals(column: MigrationColumnSchema): string {
+  if (isOrdinalEnumColumn(column)) {
+    return (column.enumValues ?? []).map((_, index) => String(index)).join(", ");
+  }
+
+  return enumSqlLiterals(column.enumValues ?? []);
+}
+
+function enumValuesHash(values: string[]): string {
+  let hash = 0;
+
+  for (const char of values.join("\u001f")) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return hash.toString(16).padStart(8, "0");
+}
+
 function columnDefinition(
   column: MigrationColumnSchema,
   options: { inlinePrimary: boolean },
@@ -686,7 +812,7 @@ function columnDefinition(
     });
   }
 
-  const dbType = column.dbType ?? defaultType(column, { identity: options.inlinePrimary });
+  const dbType = columnType(column, { identity: options.inlinePrimary });
   const constraints = options.inlinePrimary && column.primary
     ? " PRIMARY KEY"
     : column.nullable
@@ -702,7 +828,18 @@ function columnDefinition(
 }
 
 function columnAlterType(column: MigrationColumnSchema): string {
-  return column.dbType ?? defaultType(column, { identity: false });
+  return columnType(column, { identity: false });
+}
+
+function columnType(
+  column: MigrationColumnSchema,
+  options: { identity: boolean },
+): string {
+  if (isNativeEnumColumn(column)) {
+    return `ENUM(${enumSqlLiterals(column.enumValues ?? [])})`;
+  }
+
+  return column.dbType ?? defaultType(column, { identity: options.identity });
 }
 
 function normalizeDesiredDefault(
@@ -815,6 +952,10 @@ function defaultType(
 
   if (normalized === "string") {
     return "VARCHAR(255)";
+  }
+
+  if (column.enumValues?.length) {
+    return isOrdinalEnumColumn(column) ? "INT" : "VARCHAR(255)";
   }
 
   if (normalized === "number") {
@@ -1105,12 +1246,14 @@ async function readCurrentTables(
 
     const indexes = await readCurrentIndexes(connection, table);
     const foreignKeys = await readCurrentForeignKeys(connection, table);
+    const checkConstraints = await readCurrentCheckConstraints(connection, table);
 
     currentTables.set(tableKey(table), {
       exists: columns.size > 0,
       columns,
       indexes,
       foreignKeys,
+      checkConstraints,
     });
   }
 
@@ -1201,6 +1344,31 @@ async function readCurrentForeignKeys(
   }
 
   return foreignKeys;
+}
+
+async function readCurrentCheckConstraints(
+  connection: MysqlConnection,
+  table: MigrationTableSchema,
+): Promise<Map<string, CurrentCheckConstraintSchema>> {
+  const result = normalizeMysqlResult<MysqlCheckConstraintRow>(
+    await connection.query(
+      [
+        "SELECT",
+        "  CONSTRAINT_NAME AS constraintName",
+        "FROM information_schema.table_constraints",
+        `WHERE table_schema = ${table.schema ? "?" : "DATABASE()"} AND table_name = ?`,
+        "  AND CONSTRAINT_TYPE = 'CHECK'",
+      ].join("\n"),
+      table.schema ? [table.schema, table.tableName] : [table.tableName],
+    ),
+  );
+  const constraints = new Map<string, CurrentCheckConstraintSchema>();
+
+  for (const row of result.rows) {
+    constraints.set(row.constraintName, { name: row.constraintName });
+  }
+
+  return constraints;
 }
 
 async function acquireLock(connection: MysqlConnection): Promise<void> {
@@ -1516,6 +1684,10 @@ function parseMysqlQualifiedIdentifier(identifier: string): {
 
 
 function normalizeMysqlTypeName(value: string): string {
+  if (/^enum\s*\(/i.test(value.trim())) {
+    return value.trim().replace(/^enum/i, "enum").replace(/,\s*/g, ", ");
+  }
+
   const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
 
   if (normalized === "integer") {

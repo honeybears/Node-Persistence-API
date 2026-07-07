@@ -332,7 +332,7 @@ function compileIdWhere(
   values: unknown[],
 ): string {
   return primaryKeyValueEntries(id, options).map(([property, value]) => {
-    values.push(value);
+    values.push(normalizeMysqlPropertyValues(property, value, options)[0]);
     return `${mysqlPropertyToColumns(property, options)[0]} = ?`;
   }).join(" AND ");
 }

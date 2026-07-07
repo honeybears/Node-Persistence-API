@@ -16,8 +16,17 @@ export interface ColumnOptions {
   default?: string | number | boolean | null;
   index?: boolean | string;
   unique?: boolean | string;
+  enum?: readonly string[] | Record<string, string | number>;
+  enumType?: EnumType | `${EnumType}`;
+  enumName?: string;
   generationStrategy?: GenerationStrategy | `${GenerationStrategy}`;
   sequenceName?: string;
+}
+
+export enum EnumType {
+  STRING = "STRING",
+  ORDINAL = "ORDINAL",
+  NATIVE = "NATIVE",
 }
 
 export enum GenerationStrategy {
@@ -78,6 +87,9 @@ export interface ColumnMetadata {
   nullable: boolean;
   type?: string;
   default?: string | number | boolean | null;
+  enumValues?: string[];
+  enumType?: EnumType | `${EnumType}`;
+  enumName?: string;
   generationStrategy?: GenerationStrategy | `${GenerationStrategy}`;
   sequenceName?: string;
   primary: boolean;

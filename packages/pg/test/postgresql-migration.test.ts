@@ -134,6 +134,63 @@ describe("PostgreSQL migration compiler", () => {
       ")",
     ].join("\n"));
   });
+
+  test("compiles enum columns as STRING checks by default and native enums when requested", () => {
+    const statements = compilePostgresqlMigrationStatements({
+      entities: [{
+        ...userSchema,
+        columns: [
+          ...userSchema.columns,
+          {
+            propertyName: "role",
+            columnName: "role",
+            tsType: "string",
+            nullable: false,
+            primary: false,
+            version: false,
+            enumValues: ["ADMIN", "USER"],
+            enumType: "NATIVE",
+            enumName: "user_role",
+          },
+          {
+            propertyName: "state",
+            columnName: "state",
+            tsType: "UserState",
+            nullable: false,
+            primary: false,
+            version: false,
+            enumValues: ["ACTIVE", "BLOCKED"],
+          },
+          {
+            propertyName: "priority",
+            columnName: "priority",
+            tsType: "UserPriority",
+            nullable: false,
+            primary: false,
+            version: false,
+            enumValues: ["LOW", "HIGH"],
+            enumType: "ORDINAL",
+          },
+        ],
+      }],
+    });
+
+    expect(statements.some((statement) =>
+      statement.includes('CREATE TYPE "user_role" AS ENUM (\'ADMIN\', \'USER\')'),
+    )).toBeTruthy();
+    expect(statements.some((statement) =>
+      statement.includes('"role" "user_role" NOT NULL'),
+    )).toBeTruthy();
+    expect(statements.some((statement) =>
+      statement.includes('CHECK ("state" IN (\'ACTIVE\', \'BLOCKED\'))'),
+    )).toBeTruthy();
+    expect(statements.some((statement) =>
+      statement.includes('"priority" INTEGER NOT NULL'),
+    )).toBeTruthy();
+    expect(statements.some((statement) =>
+      statement.includes('CHECK ("priority" IN (0, 1))'),
+    )).toBeTruthy();
+  });
 });
 
 function generatedSchema(className, tableName, column) {

@@ -210,6 +210,104 @@ describe("migration E2E", () => {
       }
     }, 240_000);
 
+    test(`applies string-check and native enum migrations against ${adapter.name}`, async () => {
+      const tableName = uniqueTableName(`${adapter.tablePrefix}_enum`);
+      const roleTypeName = uniqueTableName(`${adapter.tablePrefix}_role_enum`);
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeEnumMigrationProject({
+          adapter: adapter.adapterName,
+          tableName,
+          roleTypeName,
+          url: container.getConnectionUri(),
+        });
+
+        const pushed = runCli(
+          ["db", "push", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(pushed);
+
+        queryable = await adapter.createQueryable(container);
+        await adapter.executeSql(
+          queryable,
+          [
+            `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
+            "VALUES ('ACTIVE', 'ADMIN', 1)",
+          ].join(" "),
+        );
+        await expect(adapter.executeSql(
+          queryable,
+          [
+            `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
+            "VALUES ('DELETED', 'ADMIN', 1)",
+          ].join(" "),
+        )).rejects.toThrow();
+        await expect(adapter.executeSql(
+          queryable,
+          [
+            `INSERT INTO ${adapter.quoteIdentifier(tableName)}`,
+            `(${adapter.quoteIdentifier("status")}, ${adapter.quoteIdentifier("role")}, ${adapter.quoteIdentifier("priority")})`,
+            "VALUES ('ACTIVE', 'ADMIN', 9)",
+          ].join(" "),
+        )).rejects.toThrow();
+
+        const roleType = await readColumnDbType(
+          adapter,
+          queryable,
+          tableName,
+          "role",
+        );
+        const priorityType = await readColumnDbType(
+          adapter,
+          queryable,
+          tableName,
+          "priority",
+        );
+
+        if (adapter.adapterName === "postgresql") {
+          expect(roleType).toEqual(roleTypeName);
+          expect(priorityType).toEqual("integer");
+        } else {
+          expect(roleType).toMatch(/^enum\('ADMIN','USER'\)$/i);
+          expect(priorityType).toEqual("int");
+        }
+      } finally {
+        try {
+          if (queryable) {
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(tableName)}`,
+            );
+            if (adapter.adapterName === "postgresql") {
+              await adapter.executeSql(
+                queryable,
+                `DROP TYPE IF EXISTS ${adapter.quoteIdentifier(roleTypeName)}`,
+              );
+            }
+            await adapter.executeSql(
+              queryable,
+              `DROP TABLE IF EXISTS ${adapter.quoteIdentifier("_npa_migrations")}`,
+            );
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+
     test(`renames columns and guards migration history drift for ${adapter.name}`, async () => {
       const tableName = uniqueTableName(`${adapter.tablePrefix}_rename`);
       const categoryTableName = uniqueTableName(
@@ -1051,6 +1149,43 @@ function makeMigrationProject(options) {
   return root;
 }
 
+function makeEnumMigrationProject(options) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "npa-migrate-e2e-"));
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "npa.config.mjs"),
+    `export default {
+      adapter: ${JSON.stringify(options.adapter)},
+      url: ${JSON.stringify(options.url)},
+      entities: ["src/**/*.entity.ts"]
+    };`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(root, "src", "enum-product.entity.ts"),
+    `
+import { Column, Entity, EnumType, GenerationStrategy, Id } from "@node-persistence-api/core";
+
+@Entity({ name: ${JSON.stringify(options.tableName)} })
+export class EnumProduct {
+  @Id({ generationStrategy: GenerationStrategy.AUTO_INCREMENT })
+  id?: number;
+
+  @Column({ enum: ["ACTIVE", "BLOCKED"] })
+  status!: string;
+
+  @Column({ enum: ["ADMIN", "USER"], enumType: EnumType.NATIVE, enumName: ${JSON.stringify(options.roleTypeName)} })
+  role!: string;
+
+  @Column({ enum: ["LOW", "HIGH"], enumType: EnumType.ORDINAL })
+  priority!: string;
+}
+`,
+    "utf8",
+  );
+  return root;
+}
+
 function makeQualifiedMigrationProject(options) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "npa-migrate-e2e-"));
   fs.mkdirSync(path.join(root, "src"), { recursive: true });
@@ -1298,6 +1433,26 @@ async function readColumnNullable(adapter, queryable, tableName, columnName) {
   );
 
   return rows[0]?.isNullable === "YES";
+}
+
+async function readColumnDbType(adapter, queryable, tableName, columnName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          'SELECT CASE WHEN data_type = \'USER-DEFINED\' THEN udt_name ELSE data_type END AS "dbType"',
+          "FROM information_schema.columns",
+          "WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+        ].join("\n")
+      : [
+          "SELECT COLUMN_TYPE AS dbType",
+          "FROM information_schema.columns",
+          "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+        ].join("\n"),
+    [tableName, columnName],
+  );
+
+  return rows[0]?.dbType;
 }
 
 async function readIndexes(adapter, queryable, tableName) {

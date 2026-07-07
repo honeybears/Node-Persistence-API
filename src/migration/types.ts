@@ -4,6 +4,7 @@ export type MigrationGenerationStrategy =
   | "SEQUENCE"
   | "UUID"
   | "NONE";
+export type MigrationEnumType = "STRING" | "ORDINAL" | "NATIVE";
 
 export interface MigrationColumnSchema {
   propertyName: string;
@@ -12,6 +13,9 @@ export interface MigrationColumnSchema {
   dbType?: string;
   defaultValue?: string | number | boolean | null;
   defaultCurrentTimestamp?: boolean;
+  enumValues?: string[];
+  enumType?: MigrationEnumType;
+  enumName?: string;
   generationStrategy?: MigrationGenerationStrategy;
   sequenceName?: string;
   nullable: boolean;

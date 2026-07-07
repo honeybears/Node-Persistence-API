@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { toSnakeCase } from "../entity";
 import { NPAMigrationError } from "../error";
 import {
+  MigrationEnumType,
   MigrationGenerationStrategy,
   MigrationColumnSchema,
   MigrationEntitySchema,
@@ -17,6 +18,9 @@ interface DecoratorOptions {
   schema?: string;
   type?: string;
   defaultValue?: string | number | boolean | null;
+  enumValues?: string[];
+  enumType?: MigrationEnumType;
+  enumName?: string;
   generationStrategy?: MigrationGenerationStrategy;
   sequenceName?: string;
   nullable?: boolean;
@@ -49,6 +53,7 @@ export function discoverEntitySchemas(
 export function parseEntitySchemas(filePath: string): MigrationEntitySchema[] {
   const source = fs.readFileSync(filePath, "utf8");
   const entities: MigrationEntitySchema[] = [];
+  const enumValuesByName = readEnumDeclarations(source);
   const entityPattern = /@Entity(?:\(([\s\S]*?)\))?\s*(?:export\s+)?class\s+([A-Za-z_]\w*)/g;
   let match: RegExpExecArray | null;
 
@@ -67,7 +72,7 @@ export function parseEntitySchemas(filePath: string): MigrationEntitySchema[] {
     }
 
     const classBody = source.slice(bodyStart + 1, bodyEnd);
-    const columns = parseColumns(classBody, className);
+    const columns = parseColumns(classBody, className, enumValuesByName);
 
     if (columns.length === 0) {
       continue;
@@ -87,9 +92,42 @@ export function parseEntitySchemas(filePath: string): MigrationEntitySchema[] {
   return entities;
 }
 
+function readEnumDeclarations(source: string): Map<string, string[]> {
+  const enums = new Map<string, string[]>();
+  const pattern = /(?:export\s+)?(?:const\s+)?enum\s+([A-Za-z_]\w*)\s*{([\s\S]*?)}/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(source)) !== null) {
+    const values = splitTopLevel(match[2])
+      .map((entry) => readEnumMemberValue(entry))
+      .filter((value): value is string => !!value);
+
+    if (values.length > 0) {
+      enums.set(match[1], values);
+    }
+  }
+
+  return enums;
+}
+
+function readEnumMemberValue(entry: string): string | undefined {
+  const member = /^([A-Za-z_]\w*)(?:\s*=\s*(.+))?$/.exec(entry.trim());
+
+  if (!member) {
+    return undefined;
+  }
+
+  const rawValue = member[2]?.trim();
+
+  return rawValue && isStringLiteral(rawValue)
+    ? readStringLiteral(rawValue, `enum member ${member[1]}`)
+    : member[1];
+}
+
 function parseColumns(
   classBody: string,
   className: string,
+  enumValuesByName: Map<string, string[]>,
 ): MigrationColumnSchema[] {
   const columns: MigrationColumnSchema[] = [];
   const fieldPattern = createFieldPattern();
@@ -128,9 +166,13 @@ function parseColumns(
         "nullable",
         "index",
         "unique",
+        "enum",
+        "enumType",
+        "enumName",
         "generationStrategy",
         "sequenceName",
       ],
+      enumValuesByName,
     );
 
     const dbType = options.type;
@@ -143,6 +185,9 @@ function parseColumns(
       ...(options.defaultValue !== undefined
         ? { defaultValue: options.defaultValue }
         : {}),
+      ...(options.enumValues ? { enumValues: options.enumValues } : {}),
+      ...(options.enumType ? { enumType: options.enumType } : {}),
+      ...(options.enumName ? { enumName: options.enumName } : {}),
       ...((createdAt || updatedAt) && options.defaultValue === undefined
         ? { defaultCurrentTimestamp: true }
         : {}),
@@ -467,6 +512,7 @@ function parseDecoratorOptions(
   rawValue: string | undefined,
   context: string,
   supportedKeys: string[],
+  enumValuesByName: Map<string, string[]> = new Map(),
 ): DecoratorOptions {
   if (rawValue === undefined || rawValue.trim() === "") {
     return {};
@@ -539,6 +585,20 @@ function parseDecoratorOptions(
       continue;
     }
 
+    if (key === "enum") {
+      options.enumValues = readEnumValuesOption(
+        rawPropertyValue,
+        `${context}.${key}`,
+        enumValuesByName,
+      );
+      continue;
+    }
+
+    if (key === "enumType") {
+      options.enumType = readEnumTypeOption(rawPropertyValue, `${context}.${key}`);
+      continue;
+    }
+
     if (key === "joinColumns") {
       options.joinColumns = readStringArrayLiteral(rawPropertyValue, `${context}.${key}`);
       continue;
@@ -586,10 +646,66 @@ function parseDecoratorOptions(
       options.foreignKeyName = stringValue;
     } else if (key === "sequenceName") {
       options.sequenceName = stringValue;
+    } else if (key === "enumName") {
+      options.enumName = stringValue;
     }
   }
 
   return options;
+}
+
+function readEnumValuesOption(
+  rawValue: string,
+  context: string,
+  enumValuesByName: Map<string, string[]>,
+): string[] {
+  let values: string[] | undefined;
+
+  if (rawValue.trim().startsWith("[")) {
+    values = readStringArrayLiteral(rawValue, context);
+  } else {
+    values = enumValuesByName.get(rawValue.trim());
+  }
+
+  if (values?.length) {
+    return values;
+  }
+
+  throw schemaParseError(
+    `${context} must be an array of string literals or an enum declared in the same file.`,
+  );
+}
+
+function readEnumTypeOption(
+  rawValue: string,
+  context: string,
+): MigrationEnumType {
+  if (isStringLiteral(rawValue)) {
+    return readEnumType(readStringLiteral(rawValue, context), context);
+  }
+
+  const enumMatch = /^(?:EnumType|MigrationEnumType)\.(STRING|ORDINAL|NATIVE)$/.exec(
+    rawValue,
+  );
+
+  if (enumMatch) {
+    return readEnumType(enumMatch[1], context);
+  }
+
+  throw schemaParseError(
+    `${context} must be a string literal or EnumType enum member.`,
+  );
+}
+
+function readEnumType(value: string, context: string): MigrationEnumType {
+  switch (value) {
+    case "STRING":
+    case "ORDINAL":
+    case "NATIVE":
+      return value;
+    default:
+      throw schemaParseError(`${context} must be STRING, ORDINAL, or NATIVE.`);
+  }
 }
 
 function readGenerationStrategyOption(

@@ -24,6 +24,7 @@ import {
   NPADatabaseError,
   NPAMigrationError,
   sanitizeMigrationIdentifier as sanitizeIdentifier,
+  shortenIdentifier,
   tableKey,
   toSnakeCase,
 } from "@node-persistence-api/core";
@@ -76,16 +77,22 @@ interface CurrentForeignKeySchema {
   referencedColumns: string[];
 }
 
+interface CurrentCheckConstraintSchema {
+  name: string;
+}
+
 interface CurrentTableSchema {
   exists: boolean;
   columns: Map<string, CurrentColumnSchema>;
   indexes: Map<string, CurrentIndexSchema>;
   foreignKeys: Map<string, CurrentForeignKeySchema>;
+  checkConstraints: Map<string, CurrentCheckConstraintSchema>;
 }
 
 interface PostgresqlColumnRow {
   columnName: string;
   dataType: string;
+  udtName: string;
   characterMaximumLength: number | null;
   columnDefault: string | null;
   isNullable: "YES" | "NO";
@@ -104,6 +111,10 @@ interface PostgresqlForeignKeyRow {
   referencedSchema: string;
   referencedTable: string;
   referencedColumns: string[];
+}
+
+interface PostgresqlCheckConstraintRow {
+  constraintName: string;
 }
 
 interface PostgresqlHistoryRow {
@@ -471,18 +482,20 @@ function compilePostgresqlTableDiffStatements(
 
       if (!currentColumn) {
         statements.push(
+          ...compilePostgresqlEnumTypeStatements({ ...table, columns: [column] }),
           ...compilePostgresqlColumnSequenceStatements(table, column),
           `ALTER TABLE ${qualifiedTable(table)} ADD COLUMN ${quoteQualifiedIdentifier(column.columnName)} ${columnDefinition(column, { inlinePrimary: column.primary, table })}`,
         );
         continue;
       }
 
-      const expectedType = normalizePostgresqlTypeName(columnAlterType(column));
+      const expectedType = normalizePostgresqlTypeName(columnAlterType(table, column));
       const currentType = normalizePostgresqlTypeName(currentColumn.type);
 
       if (currentType !== expectedType) {
-        const renderedType = columnAlterType(column);
+        const renderedType = columnAlterType(table, column);
         statements.push(
+          ...compilePostgresqlEnumTypeStatements({ ...table, columns: [column] }),
           `ALTER TABLE ${qualifiedTable(table)} ALTER COLUMN ${quoteQualifiedIdentifier(column.columnName)} TYPE ${renderedType} USING ${quoteQualifiedIdentifier(column.columnName)}::${renderedType}`,
         );
       }
@@ -517,6 +530,12 @@ function compilePostgresqlTableDiffStatements(
     }
 
     statements.push(...compilePostgresqlIndexDiffStatements(table, currentTable.indexes));
+    statements.push(
+      ...compilePostgresqlCheckConstraintDiffStatements(
+        table,
+        currentTable.checkConstraints,
+      ),
+    );
     foreignKeyStatements.push(
       ...compilePostgresqlForeignKeyDiffStatements(table, currentTable.foreignKeys),
     );
@@ -604,6 +623,7 @@ function compilePostgresqlRenameStatements(
 
 function compilePostgresqlCreateTableStatements(table: MigrationTableSchema): string[] {
   return [
+    ...compilePostgresqlEnumTypeStatements(table),
     ...compilePostgresqlSequenceStatements(table),
     compilePostgresqlCreateTable(table),
     ...table.indexes.map((index) => compilePostgresqlCreateIndex(table, index)),
@@ -682,6 +702,39 @@ function compilePostgresqlIndexDiffStatements(
   return statements;
 }
 
+function compilePostgresqlCheckConstraintDiffStatements(
+  table: MigrationTableSchema,
+  currentChecks: Map<string, CurrentCheckConstraintSchema>,
+): string[] {
+  const statements: string[] = [];
+  const desiredChecks = desiredEnumCheckConstraints(table);
+  const desiredNames = new Set(desiredChecks.map((check) => check.name));
+  const prefixes = table.columns.map((column) =>
+    enumCheckConstraintPrefix(table, column),
+  );
+
+  for (const current of [...currentChecks.values()].sort(compareByName)) {
+    if (
+      prefixes.some((prefix) => current.name.startsWith(`${prefix}_`)) &&
+      !desiredNames.has(current.name)
+    ) {
+      statements.push(
+        `ALTER TABLE ${qualifiedTable(table)} DROP CONSTRAINT ${quoteQualifiedIdentifier(current.name)}`,
+      );
+    }
+  }
+
+  for (const check of desiredChecks) {
+    if (!currentChecks.has(check.name)) {
+      statements.push(
+        `ALTER TABLE ${qualifiedTable(table)} ADD ${compilePostgresqlCheckConstraint(check)}`,
+      );
+    }
+  }
+
+  return statements;
+}
+
 function compilePostgresqlCreateTable(table: MigrationTableSchema): string {
   const columnLines = table.columns.map(
     (column) => `  ${quoteQualifiedIdentifier(column.columnName)} ${columnDefinition(column, { inlinePrimary: !table.primaryKey, table })}`,
@@ -689,10 +742,13 @@ function compilePostgresqlCreateTable(table: MigrationTableSchema): string {
   const primaryKeyLines = table.primaryKey?.length
     ? [`  PRIMARY KEY (${table.primaryKey.map(quoteQualifiedIdentifier).join(", ")})`]
     : [];
+  const checkLines = desiredEnumCheckConstraints(table).map(
+    (check) => `  ${compilePostgresqlCheckConstraint(check)}`,
+  );
 
   return [
     `CREATE TABLE IF NOT EXISTS ${qualifiedTable(table)} (`,
-    [...columnLines, ...primaryKeyLines].join(",\n"),
+    [...columnLines, ...primaryKeyLines, ...checkLines].join(",\n"),
     ")",
   ].join("\n");
 }
@@ -709,11 +765,122 @@ function compilePostgresqlForeignKeyConstraint(
   ].filter(Boolean).join(" ");
 }
 
+function compilePostgresqlCheckConstraint(
+  check: { name: string; column: MigrationColumnSchema },
+): string {
+  return [
+    `CONSTRAINT ${quoteQualifiedIdentifier(check.name)}`,
+    `CHECK (${quoteQualifiedIdentifier(check.column.columnName)} IN (${enumCheckLiterals(check.column)}))`,
+  ].join(" ");
+}
+
+function desiredEnumCheckConstraints(
+  table: MigrationTableSchema,
+): Array<{ name: string; column: MigrationColumnSchema }> {
+  return table.columns
+    .filter((column) => column.enumValues?.length && !isNativeEnumColumn(column))
+    .map((column) => ({
+      name: enumCheckConstraintName(table, column),
+      column,
+    }))
+    .sort(compareByName);
+}
+
+function enumCheckConstraintPrefix(
+  table: MigrationTableSchema,
+  column: MigrationColumnSchema,
+): string {
+  return shortenIdentifier(
+    sanitizeIdentifier(`chk_${table.tableName}_${column.columnName}_enum`),
+    MAX_FOREIGN_KEY_IDENTIFIER_LENGTH - 9,
+  );
+}
+
+function enumCheckConstraintName(
+  table: MigrationTableSchema,
+  column: MigrationColumnSchema,
+): string {
+  return shortenIdentifier(
+    `${enumCheckConstraintPrefix(table, column)}_${enumValuesHash([
+      column.enumType ?? "STRING",
+      ...(column.enumValues ?? []),
+    ])}`,
+    MAX_FOREIGN_KEY_IDENTIFIER_LENGTH,
+  );
+}
+
+function compilePostgresqlEnumTypeStatements(table: MigrationTableSchema): string[] {
+  const statements = new Map<string, string>();
+
+  for (const column of table.columns) {
+    if (!isNativeEnumColumn(column)) {
+      continue;
+    }
+
+    const typeName = postgresqlEnumTypeName(table, column);
+    statements.set(typeName, [
+      "DO $$ BEGIN",
+      `  CREATE TYPE ${typeName} AS ENUM (${enumSqlLiterals(column.enumValues ?? [])});`,
+      "EXCEPTION WHEN duplicate_object THEN NULL;",
+      "END $$",
+    ].join("\n"));
+  }
+
+  return [...statements.values()];
+}
+
+function isNativeEnumColumn(column: MigrationColumnSchema): boolean {
+  return !!column.enumValues?.length && column.enumType === "NATIVE";
+}
+
+function isOrdinalEnumColumn(column: MigrationColumnSchema): boolean {
+  return !!column.enumValues?.length && column.enumType === "ORDINAL";
+}
+
+function enumCheckLiterals(column: MigrationColumnSchema): string {
+  if (isOrdinalEnumColumn(column)) {
+    return (column.enumValues ?? []).map((_, index) => String(index)).join(", ");
+  }
+
+  return enumSqlLiterals(column.enumValues ?? []);
+}
+
+function postgresqlEnumTypeName(
+  table: MigrationTableSchema | undefined,
+  column: MigrationColumnSchema,
+): string {
+  if (column.enumName) {
+    return quoteQualifiedIdentifier(column.enumName);
+  }
+
+  const name = sanitizeIdentifier(`${table?.tableName ?? "npa"}_${column.columnName}_enum`);
+  return table?.schema
+    ? `${quoteQualifiedIdentifier(table.schema)}.${quoteQualifiedIdentifier(name)}`
+    : quoteQualifiedIdentifier(name);
+}
+
+function enumSqlLiterals(values: string[]): string {
+  return values.map((value) => `'${value.replace(/'/g, "''")}'`).join(", ");
+}
+
+function enumValuesHash(values: string[]): string {
+  let hash = 0;
+
+  for (const char of values.join("\u001f")) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+
+  return hash.toString(16).padStart(8, "0");
+}
+
 function columnDefinition(
   column: MigrationColumnSchema,
   options: { inlinePrimary: boolean; table?: MigrationTableSchema },
 ): string {
-  const dbType = column.dbType ?? defaultType(column, { identity: options.inlinePrimary });
+  const dbType = columnType(column, {
+    identity: options.inlinePrimary,
+    table: options.table,
+  });
   const constraints = options.inlinePrimary && column.primary
     ? " PRIMARY KEY"
     : column.nullable
@@ -724,8 +891,19 @@ function columnDefinition(
   return `${dbType}${constraints}${defaultClause}`;
 }
 
-function columnAlterType(column: MigrationColumnSchema): string {
-  return column.dbType ?? defaultType(column, { identity: false });
+function columnAlterType(table: MigrationTableSchema, column: MigrationColumnSchema): string {
+  return columnType(column, { identity: false, table });
+}
+
+function columnType(
+  column: MigrationColumnSchema,
+  options: { identity: boolean; table?: MigrationTableSchema },
+): string {
+  if (isNativeEnumColumn(column)) {
+    return postgresqlEnumTypeName(options.table, column);
+  }
+
+  return column.dbType ?? defaultType(column, { identity: options.identity });
 }
 
 function postgresqlDefaultDiffStatement(
@@ -871,6 +1049,10 @@ function defaultType(
 
   if (normalized === "string") {
     return "TEXT";
+  }
+
+  if (column.enumValues?.length) {
+    return isOrdinalEnumColumn(column) ? "INTEGER" : "TEXT";
   }
 
   if (normalized === "number") {
@@ -1152,6 +1334,7 @@ async function readCurrentTables(
         "SELECT",
         "  column_name AS \"columnName\",",
         "  data_type AS \"dataType\",",
+        "  udt_name AS \"udtName\",",
         "  character_maximum_length AS \"characterMaximumLength\",",
         "  column_default AS \"columnDefault\",",
         "  is_nullable AS \"isNullable\"",
@@ -1176,12 +1359,14 @@ async function readCurrentTables(
 
     const indexes = await readCurrentIndexes(connection, table);
     const foreignKeys = await readCurrentForeignKeys(connection, table);
+    const checkConstraints = await readCurrentCheckConstraints(connection, table);
 
     currentTables.set(tableKey(table), {
       exists: columns.size > 0,
       columns,
       indexes,
       foreignKeys,
+      checkConstraints,
     });
   }
 
@@ -1189,6 +1374,10 @@ async function readCurrentTables(
 }
 
 function currentPostgresqlType(row: PostgresqlColumnRow): string {
+  if (row.dataType === "USER-DEFINED") {
+    return row.udtName;
+  }
+
   if (row.dataType === "character varying" && row.characterMaximumLength) {
     return `character varying(${row.characterMaximumLength})`;
   }
@@ -1278,6 +1467,30 @@ async function readCurrentForeignKeys(
   }
 
   return foreignKeys;
+}
+
+async function readCurrentCheckConstraints(
+  connection: PostgresqlConnection,
+  table: MigrationTableSchema,
+): Promise<Map<string, CurrentCheckConstraintSchema>> {
+  const result = await connection.query<PostgresqlCheckConstraintRow>(
+    [
+      "SELECT",
+      "  constraint_name AS \"constraintName\"",
+      "FROM information_schema.table_constraints",
+      "WHERE constraint_type = 'CHECK'",
+      "  AND table_schema = $1",
+      "  AND table_name = $2",
+    ].join("\n"),
+    [table.schema ?? "public", table.tableName],
+  );
+  const constraints = new Map<string, CurrentCheckConstraintSchema>();
+
+  for (const row of result.rows) {
+    constraints.set(row.constraintName, { name: row.constraintName });
+  }
+
+  return constraints;
 }
 
 async function readPreviousChecksum(
@@ -1549,6 +1762,11 @@ function normalizePostgresqlTypeName(value: string): string {
 
   if (normalized === "timestamp") {
     return "timestamp without time zone";
+  }
+
+  const unquoted = normalized.replace(/"/g, "");
+  if (/^[a-z_]\w*(?:\.[a-z_]\w*)?$/.test(unquoted)) {
+    return unquoted.split(".").at(-1) ?? unquoted;
   }
 
   return normalized;

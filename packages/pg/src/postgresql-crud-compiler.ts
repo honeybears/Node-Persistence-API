@@ -320,7 +320,7 @@ function compileIdWhere(
   values: unknown[],
 ): string {
   return primaryKeyValueEntries(id, options).map(([property, value]) => {
-    values.push(value);
+    values.push(normalizePropertyValues(property, value, options)[0]);
     return `${propertyToColumns(property, options)[0]} = $${values.length}`;
   }).join(" AND ");
 }
