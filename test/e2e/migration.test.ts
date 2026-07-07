@@ -500,6 +500,137 @@ describe("migration E2E", () => {
       }
     }, 240_000);
   }
+
+  for (const adapter of databaseAdapters) {
+    test(`plans indexed no-op and nullable diffs with migrate dev against ${adapter.name}`, async () => {
+      const tableName = uniqueTableName(`${adapter.tablePrefix}_migrate_diff`);
+      const categoryTableName = uniqueTableName(
+        `${adapter.tablePrefix}_migrate_diff_category`,
+      );
+      const joinTableName = uniqueTableName(
+        `${adapter.tablePrefix}_migrate_diff_join`,
+      );
+      const statusIndexName = uniqueTableName(
+        `${adapter.tablePrefix}_migrate_diff_status_idx`,
+      );
+      const skuUniqueIndexName = uniqueTableName(
+        `${adapter.tablePrefix}_migrate_diff_sku_uidx`,
+      );
+      const container = await startContainerOrSkip(adapter.createContainer());
+
+      if (!container) {
+        return;
+      }
+
+      let queryable;
+
+      try {
+        const root = makeMigrationProject({
+          adapter: adapter.adapterName,
+          tableName,
+          categoryTableName,
+          joinTableName,
+          statusIndexName,
+          skuUniqueIndexName,
+          url: container.getConnectionUri(),
+          withRelations: true,
+        });
+
+        const pushed = runCli(
+          ["db", "push", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(pushed);
+
+        const indexedNoop = runCli(
+          ["migrate", "dev", "--dry-run", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(indexedNoop);
+        expect(indexedNoop.stdout).toMatch(/Statements: 0/);
+        expect(indexedNoop.stderr).not.toMatch(/join is not a function/);
+
+        writeProductEntity(root, {
+          tableName,
+          categoryTableName,
+          joinTableName,
+          statusIndexName,
+          skuUniqueIndexName,
+          withRelations: true,
+          statusNullable: true,
+        });
+
+        const nullablePreview = runCli(
+          [
+            "migrate",
+            "dev",
+            "--dry-run",
+            "--name",
+            "nullable_status",
+            "--config",
+            "npa.config.mjs",
+          ],
+          root,
+        );
+        expectCliSuccess(nullablePreview);
+        expect(nullablePreview.stdout).toMatch(/Statements: 1/);
+        expect(nullablePreview.stdout).toMatch(
+          adapter.adapterName === "postgresql"
+            ? /ALTER TABLE .* ALTER COLUMN .*status.* DROP NOT NULL/
+            : /ALTER TABLE .* MODIFY COLUMN .*status/,
+        );
+
+        const nullableMigration = runCli(
+          [
+            "migrate",
+            "dev",
+            "--name",
+            "nullable_status",
+            "--config",
+            "npa.config.mjs",
+          ],
+          root,
+        );
+        expectCliSuccess(nullableMigration);
+        expect(nullableMigration.stdout).toMatch(
+          /Created and applied migration \d{14}_nullable_status/,
+        );
+
+        queryable = await adapter.createQueryable(container);
+        expect(
+          await readColumnNullable(adapter, queryable, tableName, "status"),
+        ).toEqual(true);
+
+        const finalNoop = runCli(
+          ["migrate", "dev", "--dry-run", "--config", "npa.config.mjs"],
+          root,
+        );
+        expectCliSuccess(finalNoop);
+        expect(finalNoop.stdout).toMatch(/Statements: 0/);
+      } finally {
+        try {
+          if (queryable) {
+            for (const table of [
+              joinTableName,
+              categoryTableName,
+              tableName,
+              "_npa_migrations",
+            ]) {
+              await adapter.executeSql(
+                queryable,
+                `DROP TABLE IF EXISTS ${adapter.quoteIdentifier(table)}`,
+              );
+            }
+          }
+        } finally {
+          if (queryable) {
+            await adapter.closeQueryable(queryable);
+          }
+          await container.stop();
+        }
+      }
+    }, 240_000);
+  }
 });
 
 function runCli(args, cwd) {
@@ -569,6 +700,11 @@ function writeConfig(root, config) {
 }
 
 function writeProductEntity(root, options) {
+  const statusOptions = columnOptions({
+    index: options.withRelations ? options.statusIndexName : undefined,
+    nullable: options.statusNullable ? true : undefined,
+  });
+
   fs.writeFileSync(
     path.join(root, "src", "product.entity.ts"),
     `
@@ -588,8 +724,8 @@ export class Product {
   @Column(${options.withRelations ? "{ default: true }" : ""})
   active!: boolean;
 
-  @Column(${options.withRelations ? "{ index: " + JSON.stringify(options.statusIndexName) + " }" : ""})
-  status!: string;
+  @Column(${statusOptions})
+  status${options.statusNullable ? "?" : "!"}: string${options.statusNullable ? " | null" : ""};
 
   @Column({ name: "created_at" })
   createdAt!: Date;
@@ -614,6 +750,14 @@ export class Category {
 `,
     "utf8",
   );
+}
+
+function columnOptions(options) {
+  const entries = Object.entries(options)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+
+  return entries.length ? `{ ${entries.join(", ")} }` : "";
 }
 
 function writeRenamedProductEntity(root, options) {
@@ -718,6 +862,26 @@ async function readColumnNames(adapter, queryable, tableName) {
   );
 
   return rows.map((row) => row.columnName);
+}
+
+async function readColumnNullable(adapter, queryable, tableName, columnName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          'SELECT is_nullable AS "isNullable"',
+          "FROM information_schema.columns",
+          "WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+        ].join("\n")
+      : [
+          "SELECT IS_NULLABLE AS isNullable",
+          "FROM information_schema.columns",
+          "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+        ].join("\n"),
+    [tableName, columnName],
+  );
+
+  return rows[0]?.isNullable === "YES";
 }
 
 async function readIndexes(adapter, queryable, tableName) {
