@@ -782,7 +782,7 @@ describe("PostgreSQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: postgresql({ queryable: asPgQueryable(queryable) }),
+      adapter: postgresql({ connection: asPgQueryable(queryable) }),
       repositories: [PgProductRepository],
     });
     const products = npa.get(PgProductRepository) as PgProductRepository &
@@ -822,7 +822,7 @@ describe("PostgreSQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: postgresql({ queryable: asPgQueryable(queryable) }),
+      adapter: postgresql({ connection: asPgQueryable(queryable) }),
       operations: {
         logger: (event) => events.push(event),
         onSlowQuery: (event) => slowQueries.push(event),
@@ -861,7 +861,7 @@ describe("PostgreSQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: postgresql({ queryable: asPgQueryable(queryable) }),
+      adapter: postgresql({ connection: asPgQueryable(queryable) }),
       operations: {
         logger: (event) => events.push(event),
       },

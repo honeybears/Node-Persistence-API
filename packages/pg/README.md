@@ -17,14 +17,13 @@ import {
   PostgresqlConnection,
   postgresql,
 } from '@node-persistence-api/connector-pg';
-import './repositories';
 import { UserRepository } from './user.repository';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const connection = new PostgresqlConnection(pool);
 
 const npa = createNPA({
-  adapter: postgresql({ queryable: connection }),
+  adapter: postgresql({ connection }),
 });
 
 const users = npa.get(UserRepository);

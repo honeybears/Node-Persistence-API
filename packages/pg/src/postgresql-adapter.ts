@@ -12,25 +12,21 @@ import {
   PostgresqlTransactionManager,
 } from "./postgresql-transaction-manager";
 
-export type PostgresqlAdapterOptions =
-  | { connection: PostgresqlTransactionConnection; queryable?: never }
-  | { connection?: never; queryable: PostgresqlQueryable };
+export interface PostgresqlAdapterOptions {
+  connection: PostgresqlTransactionConnection;
+}
 
 export function postgresql(
   options: PostgresqlAdapterOptions,
 ): NPARuntimeAdapter {
-  const transactionManager = options.connection
-    ? new PostgresqlTransactionManager(options.connection)
-    : undefined;
-  const queryable = wrapPostgresqlQueryable(
-    transactionManager?.queryable ?? options.queryable,
-  );
-
-  if (!queryable) {
-    throw new NPAConfigurationError("PostgreSQL adapter requires queryable or connection.", {
+  if (!options.connection) {
+    throw new NPAConfigurationError("PostgreSQL adapter requires connection.", {
       code: "NPA_ADAPTER_REQUIRED",
     });
   }
+
+  const transactionManager = new PostgresqlTransactionManager(options.connection);
+  const queryable = wrapPostgresqlQueryable(transactionManager.queryable);
 
   return {
     transactionManager,
@@ -61,12 +57,8 @@ export function postgresql(
 }
 
 function wrapPostgresqlQueryable(
-  queryable: PostgresqlQueryable | undefined,
-): PostgresqlQueryable | undefined {
-  if (!queryable) {
-    return undefined;
-  }
-
+  queryable: PostgresqlQueryable,
+): PostgresqlQueryable {
   return {
     query: async <TRow = Record<string, unknown>>(
       text: string,

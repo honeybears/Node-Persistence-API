@@ -801,7 +801,7 @@ describe("MySQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: mysql({ queryable: asMysqlQueryable(queryable) }),
+      adapter: mysql({ connection: asMysqlQueryable(queryable) }),
       repositories: [ProductRepository],
     });
     const products = npa.get(ProductRepository) as ProductRepository & DynamicRepository;
@@ -838,7 +838,7 @@ describe("MySQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: mysql({ queryable: asMysqlQueryable(queryable) }),
+      adapter: mysql({ connection: asMysqlQueryable(queryable) }),
       operations: {
         logger: (event) => events.push(event),
         onSlowQuery: (event) => slowQueries.push(event),
@@ -877,7 +877,7 @@ describe("MySQL adapter", () => {
       },
     };
     const npa = createNPA({
-      adapter: mysql({ queryable: asMysqlQueryable(queryable) }),
+      adapter: mysql({ connection: asMysqlQueryable(queryable) }),
       operations: {
         logger: (event) => events.push(event),
       },

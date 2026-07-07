@@ -17,14 +17,13 @@ import {
   MysqlConnection,
   mysql as npaMysql,
 } from '@node-persistence-api/connector-mysql';
-import './repositories';
 import { UserRepository } from './user.repository';
 
 const pool = mysql.createPool(process.env.DATABASE_URL);
 const connection = new MysqlConnection(pool);
 
 const npa = createNPA({
-  adapter: npaMysql({ queryable: connection }),
+  adapter: npaMysql({ connection }),
 });
 
 const users = npa.get(UserRepository);

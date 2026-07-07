@@ -422,7 +422,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const connection = new PostgresqlConnection(pool);
 
 const npa = createNPA({
-  adapter: postgresql({ queryable: connection }),
+  adapter: postgresql({ connection }),
 });
 
 const users = npa.get(UserRepository);
@@ -457,7 +457,7 @@ const pool = mysql.createPool(process.env.DATABASE_URL);
 const connection = new MysqlConnection(pool);
 
 const npa = createNPA({
-  adapter: npaMysql({ queryable: connection }),
+  adapter: npaMysql({ connection }),
 });
 
 const users = npa.get(UserRepository);
@@ -486,7 +486,7 @@ import { createNPA, NPADatabaseError } from '@node-persistence-api/core';
 import { postgresql } from '@node-persistence-api/connector-pg';
 
 const npa = createNPA({
-  adapter: postgresql({ queryable: connection }),
+  adapter: postgresql({ connection }),
   operations: {
     logger(event) {
       console.log(event.adapter, event.durationMs, event.text, event.values);
