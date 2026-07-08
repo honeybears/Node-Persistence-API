@@ -528,7 +528,7 @@ available.
 
 Use a database transaction manager when multiple repository calls must commit or
 roll back as one unit. Pass a transaction-capable connection to the runtime
-adapter, then decorate service methods with `@Transaction()`. The default
+adapter, then decorate service methods with `@Transactional()`. The default
 propagation is `TransactionPropagation.REQUIRED`, so nested transactional calls
 reuse the active transaction. Use
 `{ propagation: TransactionPropagation.REQUIRES_NEW }` to force a separate
@@ -539,7 +539,7 @@ database transaction and rejects dirty-checking flushes, `save`, and `delete`.
 ```ts
 import {
   TransactionIsolation,
-  Transaction,
+  Transactional,
   createNPA,
 } from '@node-persistence-api/core';
 import { postgresql } from '@node-persistence-api/connector-pg';
@@ -554,7 +554,7 @@ const npa = createNPA({
 class UserService {
   private readonly users = npa.get(UserRepository);
 
-  @Transaction({ isolation: TransactionIsolation.READ_COMMITTED })
+  @Transactional({ isolation: TransactionIsolation.READ_COMMITTED })
   async renameUser(id: number, name: string): Promise<void> {
     await this.users.save({ id, name });
     await this.users.findById(id);
@@ -566,7 +566,7 @@ const service = new UserService();
 
 When multiple `NPA` instances register transaction managers, pass
 `name: 'main'` to each instance and choose one explicitly with
-`@Transaction({ managerName: 'main' })`.
+`@Transactional({ managerName: 'main' })`.
 
 MySQL uses the same core decorator with
 `@node-persistence-api/connector-mysql`. Transaction options currently support
@@ -768,7 +768,7 @@ Transaction codes:
 | `NPA_TRANSACTION_MANAGER_NOT_FOUND` | transaction manager could not be resolved |
 | `NPA_TRANSACTION_MANAGER_DUPLICATED` | named transaction manager is duplicated |
 | `NPA_TRANSACTION_MANAGER_AMBIGUOUS` | multiple default transaction managers exist |
-| `NPA_TRANSACTION_DECORATOR_INVALID_TARGET` | `@Transaction` was not used on a method |
+| `NPA_TRANSACTION_DECORATOR_INVALID_TARGET` | `@Transactional` was not used on a method |
 | `NPA_TRANSACTION_PROPAGATION_UNSUPPORTED` | propagation mode is unsupported |
 | `NPA_NESTED_TRANSACTION_UNSUPPORTED` | nested transaction savepoints are unavailable |
 | `NPA_ROLLBACK_ONLY` | joined transaction was marked rollback-only |

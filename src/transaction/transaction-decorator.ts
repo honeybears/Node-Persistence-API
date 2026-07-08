@@ -9,7 +9,7 @@ export interface TransactionDecoratorOptions
   managerProperty?: string;
 }
 
-export function Transaction(
+export function Transactional(
   options: TransactionDecoratorOptions = {},
 ): MethodDecorator {
   return (
@@ -20,7 +20,7 @@ export function Transaction(
     const original = descriptor.value as (...args: unknown[]) => unknown;
 
     if (typeof original !== "function") {
-      throw new NPATransactionError("@Transaction can only decorate methods.", {
+      throw new NPATransactionError("@Transactional can only decorate methods.", {
         code: "NPA_TRANSACTION_DECORATOR_INVALID_TARGET",
       });
     }
@@ -71,7 +71,7 @@ function resolveTransactionManager(
     }
 
     throw new NPATransactionError(
-      `@Transaction could not find a transaction manager. Add a ${managerProperty} property or pass @Transaction({ manager }).`,
+      `@Transactional could not find a transaction manager. Add a ${managerProperty} property or pass @Transactional({ manager }).`,
       {
         code: "NPA_TRANSACTION_MANAGER_NOT_FOUND",
         details: { managerProperty },
@@ -101,7 +101,7 @@ function resolveTransactionManager(
   }
 
   throw new NPATransactionError(
-    `@Transaction could not find a transaction manager. Add a ${propertyName} property, pass @Transaction({ manager }), or register one with createNPA({ transactionManager }).`,
+    `@Transactional could not find a transaction manager. Add a ${propertyName} property, pass @Transactional({ manager }), or register one with createNPA({ transactionManager }).`,
     {
       code: "NPA_TRANSACTION_MANAGER_NOT_FOUND",
       details: { managerProperty: propertyName },

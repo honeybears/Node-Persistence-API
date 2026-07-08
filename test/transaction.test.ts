@@ -7,7 +7,7 @@ import {
   getCurrentPersistenceContext,
   Id,
   RollbackOnlyError,
-  Transaction,
+  Transactional,
   TransactionIsolation,
   TransactionOptions,
   TransactionPropagation,
@@ -405,7 +405,7 @@ describe("transaction manager", () => {
     ]);
   });
 
-  test("Transaction decorator resolves a manager from the instance", async () => {
+  test("Transactional decorator resolves a manager from the instance", async () => {
     const manager = new RecordingTransactionManager();
 
     class UserService {
@@ -416,7 +416,7 @@ describe("transaction manager", () => {
       }
     }
 
-    decorateMethod(UserService, "create", Transaction());
+    decorateMethod(UserService, "create", Transactional());
 
     const service = new UserService(manager);
 
@@ -429,7 +429,7 @@ describe("transaction manager", () => {
     ]);
   });
 
-  test("Transaction decorator supports a custom manager property", async () => {
+  test("Transactional decorator supports a custom manager property", async () => {
     const manager = new RecordingTransactionManager();
 
     class UserService {
@@ -443,7 +443,7 @@ describe("transaction manager", () => {
     decorateMethod(
       UserService,
       "count",
-      Transaction({ managerProperty: "unitOfWork", readOnly: true }),
+      Transactional({ managerProperty: "unitOfWork", readOnly: true }),
     );
 
     const service = new UserService(manager);
@@ -457,7 +457,7 @@ describe("transaction manager", () => {
     ]);
   });
 
-  test("Transaction decorator resolves a manager registered by NPA", async () => {
+  test("Transactional decorator resolves a manager registered by NPA", async () => {
     const manager = new RecordingTransactionManager();
 
     createNPA({
@@ -476,7 +476,7 @@ describe("transaction manager", () => {
       }
     }
 
-    decorateMethod(UserService, "count", Transaction());
+    decorateMethod(UserService, "count", Transactional());
 
     expect(await new UserService().count()).toEqual(true);
     expect(manager.calls).toEqual([
@@ -487,7 +487,7 @@ describe("transaction manager", () => {
     ]);
   });
 
-  test("Transaction decorator resolves a manager from the NPA adapter", async () => {
+  test("Transactional decorator resolves a manager from the NPA adapter", async () => {
     const manager = new RecordingTransactionManager();
 
     createNPA({
@@ -506,7 +506,7 @@ describe("transaction manager", () => {
       }
     }
 
-    decorateMethod(UserService, "count", Transaction());
+    decorateMethod(UserService, "count", Transactional());
 
     expect(await new UserService().count()).toEqual(true);
     expect(manager.calls).toEqual([
@@ -517,7 +517,7 @@ describe("transaction manager", () => {
     ]);
   });
 
-  test("Transaction decorator requires a name when multiple managers are registered", async () => {
+  test("Transactional decorator requires a name when multiple managers are registered", async () => {
     const userManager = new RecordingTransactionManager();
     const auditManager = new RecordingTransactionManager();
     const adapter = {
@@ -549,11 +549,11 @@ describe("transaction manager", () => {
       }
     }
 
-    decorateMethod(UserService, "save", Transaction());
+    decorateMethod(UserService, "save", Transactional());
     decorateMethod(
       UserService,
       "writeAudit",
-      Transaction({ managerName: "audit" }),
+      Transactional({ managerName: "audit" }),
     );
 
     const service = new UserService();

@@ -1,4 +1,4 @@
-import { CascadeType, Column, CursorPage, Entity, EntityGraph, Id, ManyToOne, ManyToMany, NPARepository, OneToOne, Page, Pageable, Query, RawQueryResult, TransactionIsolation, TransactionPropagation, OneToMany, OptimisticLockError, RollbackOnlyError, Transaction } from "../../src";
+import { CascadeType, Column, CursorPage, Entity, EntityGraph, Id, ManyToOne, ManyToMany, NPARepository, OneToOne, Page, Pageable, Query, RawQueryResult, TransactionIsolation, TransactionPropagation, OneToMany, OptimisticLockError, RollbackOnlyError, Transactional } from "../../src";
 import { createPostgresqlDerivedQueryRepository } from "../../packages/pg/src";
 import { createMysqlDerivedQueryRepository } from "../../packages/mysql/src";
 import { assertRepositoryContract, createProductEntity, databaseAdapters, runDatabaseFlow, startContainerOrSkip, uniqueTableName } from "./database-flow";
@@ -509,7 +509,7 @@ describe("database adapter E2E", () => {
 
   for (const adapter of databaseAdapters) {
     test(
-      `runs ${adapter.name} @Transaction E2E against a real database`,
+      `runs ${adapter.name} @Transactional E2E against a real database`,
       () =>
         runDatabaseFlow(adapter, async ({ container, tableName }) => {
           const runtime = await adapter.createTransactionRuntime(container);
@@ -763,21 +763,21 @@ class ProductService {
   }
 }
 
-decorateMethod(ProductService, "createThenFail", Transaction());
+decorateMethod(ProductService, "createThenFail", Transactional());
 decorateMethod(
   ProductService,
   "createTwo",
-  Transaction({ isolation: TransactionIsolation.READ_COMMITTED }),
+  Transactional({ isolation: TransactionIsolation.READ_COMMITTED }),
 );
-decorateMethod(ProductService, "requiredInnerFailure", Transaction());
-decorateMethod(ProductService, "innerRequiredFailure", Transaction());
-decorateMethod(ProductService, "requiresNewInnerFailure", Transaction());
+decorateMethod(ProductService, "requiredInnerFailure", Transactional());
+decorateMethod(ProductService, "innerRequiredFailure", Transactional());
+decorateMethod(ProductService, "requiresNewInnerFailure", Transactional());
 decorateMethod(
   ProductService,
   "innerRequiresNewFailure",
-  Transaction({ propagation: TransactionPropagation.REQUIRES_NEW }),
+  Transactional({ propagation: TransactionPropagation.REQUIRES_NEW }),
 );
-decorateMethod(ProductService, "renameManagedProduct", Transaction());
+decorateMethod(ProductService, "renameManagedProduct", Transactional());
 
 async function assertPaginationContract(repository: ProductRepository) {
   await repository.save(product(

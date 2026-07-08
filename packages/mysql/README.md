@@ -38,7 +38,7 @@ Pass a transaction-capable connection when repository calls must share a
 database transaction:
 
 ```ts
-import { createNPA, Transaction } from '@node-persistence-api/core';
+import { createNPA, Transactional } from '@node-persistence-api/core';
 import { mysql as npaMysql } from '@node-persistence-api/connector-mysql';
 
 const npa = createNPA({
@@ -48,7 +48,7 @@ const npa = createNPA({
 class UserService {
   private readonly users = npa.get(UserRepository);
 
-  @Transaction()
+  @Transactional()
   async rename(id: number, name: string): Promise<void> {
     await this.users.save({ id, name });
   }

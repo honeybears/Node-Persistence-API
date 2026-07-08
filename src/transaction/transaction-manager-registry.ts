@@ -36,7 +36,7 @@ export function resolveRegisteredTransactionManager(
     const manager = namedTransactionManagers.get(name);
 
     if (!manager) {
-      throw new NPATransactionError(`@Transaction could not find transaction manager "${name}".`, {
+      throw new NPATransactionError(`@Transactional could not find transaction manager "${name}".`, {
         code: "NPA_TRANSACTION_MANAGER_NOT_FOUND",
         details: { name },
       });
@@ -51,7 +51,7 @@ export function resolveRegisteredTransactionManager(
 
   if (transactionManagers.size > 1) {
     throw new NPATransactionError(
-      "@Transaction found multiple transaction managers. Pass @Transaction({ manager }), @Transaction({ managerProperty }), or @Transaction({ managerName }).",
+      "@Transactional found multiple transaction managers. Pass @Transactional({ manager }), @Transactional({ managerProperty }), or @Transactional({ managerName }).",
       {
         code: "NPA_TRANSACTION_MANAGER_AMBIGUOUS",
         details: { count: transactionManagers.size },
