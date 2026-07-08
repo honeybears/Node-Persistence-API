@@ -1,6 +1,5 @@
 import { createDerivedQueryRepository } from "./create-derived-query-repository";
 import { getEntityGraphMetadata } from "./entity-graph-decorator";
-import { createRelationMutations } from "./relation-mutation";
 import {
   NPARepository,
   NPARepositoryAdapter,
@@ -35,7 +34,6 @@ export function createNPARepository<
       count: adapter.count,
       save: adapter.save,
       saveAll: (entities: Iterable<TEntity>) => saveAll(entities, adapter),
-      relations: (entity: TEntity) => createRelationMutations(entity),
       delete: adapter.delete,
       deleteById: adapter.deleteById,
       deleteAll: adapter.deleteAll,

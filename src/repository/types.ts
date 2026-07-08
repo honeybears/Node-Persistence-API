@@ -9,19 +9,12 @@ import type {
 } from "./pagination";
 import type { RawQueryMetadata } from "./query-decorator";
 import type { NPARelationLoad } from "./relation-load-types";
-import type { NPARelationMutations } from "./relation-mutation";
 
 export type {
   Loaded,
   NPARelationLoad,
   NPARelationLoadTree,
 } from "./relation-load-types";
-export type {
-  NPARelationCollection,
-  NPARelationMutations,
-  NPAToManyRelationItem,
-  NPAToManyRelationKeys,
-} from "./relation-mutation";
 export type {
   CursorPage,
   CursorQueryMetadata,
@@ -88,7 +81,6 @@ export abstract class NPARepository<TEntity extends object, TId = unknown> {
   abstract count(): Promise<number>;
   abstract save(entity: TEntity): Promise<TEntity>;
   abstract saveAll(entities: Iterable<TEntity>): Promise<TEntity[]>;
-  abstract relations(entity: TEntity): NPARelationMutations<TEntity>;
   abstract delete(entityOrId: TEntity | TId): Promise<number>;
   abstract deleteById(id: TId): Promise<number>;
   abstract deleteAll(): Promise<number>;

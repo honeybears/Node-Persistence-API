@@ -166,9 +166,6 @@ delete children removed from the collection. Relations are lazy by default; set
 `Relation<T>` lets a relation field hold either a lazy promise or an explicitly
 loaded value. Entity classes must be exported so repositories, application code,
 and migration tooling can reference them.
-Use `repository.relations(entity).roles.add(role)`, `remove(role)`, or
-`set([role])` to mutate loaded `@OneToMany` and `@ManyToMany` collections
-without manually initializing lazy arrays.
 
 ## Repository Usage
 
@@ -587,8 +584,8 @@ and throws `OptimisticLockError` when no row matches the expected version.
 context, so saves and deletes flush with the transaction.
 `repository.saveAll(entities)` follows Spring Data JPA's shape and calls
 `save` for each entity; it does not guarantee a single batch SQL statement.
-Loaded `@OneToMany` and `@ManyToMany` collections changed through
-`repository.relations(entity)` are flushed by the same context.
+Loaded `@OneToMany` and `@ManyToMany` collections changed as entity arrays are
+flushed by the same context.
 
 ## Pagination
 
