@@ -42,10 +42,6 @@ export function findDuplicateQueryPredicates(
   return duplicates;
 }
 
-export function hasDuplicateQueryPredicates(query: ParsedQueryMethod): boolean {
-  return findDuplicateQueryPredicates(query).length > 0;
-}
-
 export function assertNoDuplicateQueryPredicates(query: ParsedQueryMethod): void {
   const duplicate = findDuplicateQueryPredicates(query)[0];
 

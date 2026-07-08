@@ -13,7 +13,6 @@ export interface NPARepositoryMetadata<TEntity extends object = object> {
 }
 
 const repositoryMetadata = new WeakMap<object, NPARepositoryMetadata>();
-const registeredRepositories = new Set<NPARepositoryTarget>();
 
 export function Repository<TEntity extends object>(
   entity: EntityTarget<TEntity>,
@@ -25,12 +24,7 @@ export function Repository<TEntity extends object>(
       entity,
       repository,
     });
-    registeredRepositories.add(repository);
   };
-}
-
-export function getRegisteredRepositoryTargets(): NPARepositoryTarget[] {
-  return Array.from(registeredRepositories);
 }
 
 export function getRepositoryMetadata<

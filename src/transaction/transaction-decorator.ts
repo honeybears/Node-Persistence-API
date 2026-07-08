@@ -51,8 +51,6 @@ export function Transaction(
   };
 }
 
-export const Transactional = Transaction;
-
 function resolveTransactionManager(
   target: unknown,
   manager: TransactionManager | undefined,
