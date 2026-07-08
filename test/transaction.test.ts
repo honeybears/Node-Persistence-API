@@ -11,8 +11,8 @@ import {
   TransactionIsolation,
   TransactionOptions,
   TransactionPropagation,
-  clearTransactionManagers,
 } from "../src";
+import { clearTransactionManagers } from "../src/transaction/transaction-manager-registry";
 
 interface RecordingResource {
   id: number;

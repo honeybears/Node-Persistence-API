@@ -2,7 +2,7 @@ import { NPATransactionError } from "../error";
 import { TransactionManager, TransactionOptions } from "./types";
 import { resolveRegisteredTransactionManager } from "./transaction-manager-registry";
 
-export interface TransactionDecoratorOptions
+export interface TransactionalOptions
   extends TransactionOptions {
   manager?: TransactionManager;
   managerName?: string;
@@ -10,7 +10,7 @@ export interface TransactionDecoratorOptions
 }
 
 export function Transactional(
-  options: TransactionDecoratorOptions = {},
+  options: TransactionalOptions = {},
 ): MethodDecorator {
   return (
     _target: object,
