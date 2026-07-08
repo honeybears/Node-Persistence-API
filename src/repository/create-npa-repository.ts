@@ -1,4 +1,3 @@
-import { NPAQueryError } from "../error";
 import { createDerivedQueryRepository } from "./create-derived-query-repository";
 import { getEntityGraphMetadata } from "./entity-graph-decorator";
 import { createRelationMutations } from "./relation-mutation";
@@ -47,19 +46,7 @@ export function createNPARepository<
   return createDerivedQueryRepository(
     repository,
     (invocation) => adapter.executeDerivedQuery(invocation),
-    (invocation) => {
-      if (!adapter.executeRawQuery) {
-        throw new NPAQueryError(
-          `Repository method "${invocation.methodName}" uses @Query, but the adapter does not support raw queries.`,
-          {
-            code: "NPA_RAW_QUERY_RESULT_MODE_UNSUPPORTED",
-            details: { methodName: invocation.methodName },
-          },
-        );
-      }
-
-      return adapter.executeRawQuery(invocation);
-    },
+    adapter.executeRawQuery,
   ) as TRepository & NPARepository<TEntity, TId>;
 }
 
