@@ -240,6 +240,29 @@ describe("migration metadata", () => {
     );
   });
 
+  test("rejects duplicate migration table names", () => {
+    const schemas = parseEntitySource(`
+      @Entity({ name: "accounts" })
+      class UserAccount {
+        @Id()
+        id!: number;
+      }
+
+      @Entity({ name: "accounts" })
+      class ServiceAccount {
+        @Id()
+        id!: number;
+      }
+    `);
+
+    expect(() =>
+      compilePostgresqlMigrationStatements({ entities: schemas })
+    ).toThrow(/Migration table "accounts" is defined more than once/);
+    expect(() =>
+      compileMysqlMigrationStatements({ entities: schemas })
+    ).toThrow(/Migration table "accounts" is defined more than once/);
+  });
+
   test("parses nullable custom database column types and defaults", () => {
     const [schema] = parseEntitySource(`
   @Entity({ name: "events" })

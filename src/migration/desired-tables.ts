@@ -50,14 +50,36 @@ export function buildDesiredMigrationTables(
 
   for (const entity of sortedEntities) {
     const table = entityTable(entity, byClassName, options);
-    tables.set(tableKey(table), table);
+    registerDesiredTable(tables, table);
   }
 
   for (const table of buildJoinTables(sortedEntities, options)) {
-    tables.set(tableKey(table), table);
+    registerDesiredTable(tables, table);
   }
 
   return [...tables.values()].sort(compareMigrationTables);
+}
+
+function registerDesiredTable(
+  tables: Map<string, MigrationTableSchema>,
+  table: MigrationTableSchema,
+): void {
+  const key = tableKey(table);
+
+  if (tables.has(key)) {
+    const qualifiedName = table.schema
+      ? `${table.schema}.${table.tableName}`
+      : table.tableName;
+    throw new NPAMigrationError(
+      `Migration table "${qualifiedName}" is defined more than once.`,
+      {
+        code: "NPA_MIGRATION_SCHEMA_PARSE_FAILED",
+        details: { table: qualifiedName },
+      },
+    );
+  }
+
+  tables.set(key, table);
 }
 
 function entityTable(
