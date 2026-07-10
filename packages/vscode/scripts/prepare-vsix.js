@@ -7,14 +7,14 @@ const vendorNodeModules = path.join(packageRoot, "vendor", "node_modules");
 
 function main() {
   const languageDist = path.join(repoRoot, "packages", "language", "dist");
-  const queryMethodDist = path.join(repoRoot, "dist", "query-method");
+  const coreDist = path.join(repoRoot, "dist");
 
   assertDirectory(languageDist, "Run npm run build before packaging the VS Code extension.");
-  assertDirectory(queryMethodDist, "Run npm run build before packaging the VS Code extension.");
+  assertDirectory(coreDist, "Run npm run build before packaging the VS Code extension.");
 
   fs.rmSync(path.join(packageRoot, "vendor"), { recursive: true, force: true });
   copyJavaScriptFiles(languageDist, path.join(vendorNodeModules, "@node-persistence-api", "language"));
-  copyJavaScriptFiles(queryMethodDist, path.join(vendorNodeModules, "@node-persistence-api", "core", "query-method"));
+  copyJavaScriptFiles(coreDist, path.join(vendorNodeModules, "@node-persistence-api", "core"));
 
   writePackageJson(path.join(vendorNodeModules, "@node-persistence-api", "language"), {
     name: "@node-persistence-api/language",

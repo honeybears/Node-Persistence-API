@@ -1,8 +1,12 @@
 import { describe, expect, test } from "@jest/globals";
-import { collectLanguageWorkspaceSchemaFromSources, findQueryDecoratorDiagnostics, findQueryParameterCompletionContext, findRepositoryContext, findRepositoryMethodDeclarations, getMethodPrefixAtOffset, parseEntitySchemasFromText } from "../src/npa-vscode-core";
+import {
+  collectLanguageWorkspaceSchemaFromSources,
+  parseLanguageEntitySchemasFromSource,
+} from "@node-persistence-api/language";
+import { findQueryDecoratorDiagnostics, findQueryParameterCompletionContext, findRepositoryContext, findRepositoryMethodDeclarations, getMethodPrefixAtOffset } from "../src/npa-vscode-core";
 describe("VS Code language core", () => {
   test("parses NPA entity source into language schemas", () => {
-    expect(parseEntitySchemasFromText(`
+    expect(parseLanguageEntitySchemasFromSource(`
       @Entity({ name: "users" })
       export class User {
         @Id()
@@ -23,12 +27,11 @@ describe("VS Code language core", () => {
     `)).toEqual([
       {
         className: "User",
-        filePath: "",
         properties: [
-          { name: "id", kind: "ID", type: "number" },
-          { name: "name", kind: "COLUMN", type: "string" },
-          { name: "createdAt", kind: "COLUMN", type: "Date" },
-          { name: "balance", kind: "COLUMN", type: "BigInteger" },
+          { name: "id", kind: "ID", type: "number", nullable: false },
+          { name: "name", kind: "COLUMN", type: "string", nullable: false },
+          { name: "createdAt", kind: "COLUMN", type: "Date", nullable: false },
+          { name: "balance", kind: "COLUMN", type: "BigInteger", nullable: false },
           { name: "team", kind: "RELATION", type: "Team", target: "Team", relationKind: "MANY_TO_ONE" },
         ],
       },
@@ -160,16 +163,16 @@ describe("VS Code language core", () => {
       entities: [
         {
           className: "User",
-          filePath: "src/user.entity.ts",
           properties: [
-            { name: "id", kind: "ID", type: "number" },
-            { name: "name", kind: "COLUMN", type: "string" },
+            { name: "id", kind: "ID", type: "number", nullable: false },
+            { name: "name", kind: "COLUMN", type: "string", nullable: false },
           ],
         },
         {
           className: "Team",
-          filePath: "src/team.entity.ts",
-          properties: [{ name: "id", kind: "ID", type: "number" }],
+          properties: [
+            { name: "id", kind: "ID", type: "number", nullable: false },
+          ],
         },
       ],
     });

@@ -4,115 +4,6 @@ const QUERY_FUNCTION_PROPERTY_PATTERN = /\b(?:(?:public|protected|private|static
 const REPOSITORY_PATTERN = /(?:export\s+)?(?:(abstract)\s+)?(class|interface)\s+([A-Za-z_]\w*)\s+extends\s+NPARepository\s*<\s*([A-Za-z_]\w*)\s*,/g;
 const QUERY_DECORATOR_DIAGNOSTIC_CODE = "npa-query-function-property";
 
-function collectLanguageWorkspaceSchemaFromSources(sources) {
-  return {
-    entities: sources.flatMap((source) =>
-      parseEntitySchemasFromText(source.text, source.filePath),
-    ),
-  };
-}
-
-function parseEntitySchemasFromText(source, filePath = "") {
-  const entities = [];
-  const entityPattern = /@Entity(?:\(([\s\S]*?)\))?\s*(?:export\s+)?class\s+([A-Za-z_]\w*)/g;
-  let match;
-
-  while ((match = entityPattern.exec(source)) !== null) {
-    const className = match[2];
-    const bodyStart = source.indexOf("{", match.index + match[0].length);
-    const bodyEnd = bodyStart < 0 ? -1 : findMatching(source, bodyStart, "{", "}");
-
-    if (bodyStart < 0 || bodyEnd < 0) {
-      continue;
-    }
-
-    entities.push({
-      className,
-      filePath,
-      properties: parseEntityProperties(source.slice(bodyStart + 1, bodyEnd)),
-    });
-  }
-
-  return entities;
-}
-
-function parseEntityProperties(classBody) {
-  const properties = [];
-  const fieldPattern = /((?:\s*@(Id|Column|Version|OneToOne|OneToMany|ManyToOne|ManyToMany)(?:\([\s\S]*?\))?\s*)+)\s*(?:public\s+|protected\s+|private\s+|readonly\s+|declare\s+)*([A-Za-z_]\w*)[!?]?\s*:\s*([^;=\n]+)/g;
-  let match;
-
-  while ((match = fieldPattern.exec(classBody)) !== null) {
-    const decorators = match[1];
-    const propertyName = match[3];
-    const type = resolvePropertyType(match[4].trim(), decorators);
-    const relation = parseRelationProperty(decorators, propertyName);
-
-    if (relation) {
-      properties.push(relation);
-      continue;
-    }
-
-    if (/@Id(?:\(|\s|$)/.test(decorators)) {
-      properties.push({
-        name: propertyName,
-        kind: "ID",
-        type,
-      });
-      continue;
-    }
-
-    if (/@(?:Column|Version)(?:\(|\s|$)/.test(decorators)) {
-      properties.push({
-        name: propertyName,
-        kind: "COLUMN",
-        type,
-      });
-    }
-  }
-
-  return properties;
-}
-
-function resolvePropertyType(type, decorators) {
-  return hasBigIntegerColumnType(decorators) ? "BigInteger" : type;
-}
-
-function hasBigIntegerColumnType(decorators) {
-  return /@(Id|Column|Version)\s*\([\s\S]*?\btype\s*:\s*(['"`])\s*bigint\b/i.test(decorators);
-}
-
-function parseRelationProperty(decorators, propertyName) {
-  const relation = /@(OneToOne|OneToMany|ManyToOne|ManyToMany)\s*\(\s*\(\s*\)\s*=>\s*([A-Za-z_]\w*)/.exec(decorators);
-
-  if (!relation) {
-    return undefined;
-  }
-
-  return {
-    name: propertyName,
-    kind: "RELATION",
-    type: relation[2],
-    target: relation[2],
-    relationKind: toRelationKind(relation[1]),
-  };
-}
-
-function toRelationKind(decoratorName) {
-  if (decoratorName === "OneToMany") {
-    return "ONE_TO_MANY";
-  }
-
-  if (decoratorName === "OneToOne") {
-    return "ONE_TO_ONE";
-  }
-
-  if (decoratorName === "ManyToOne") {
-    return "MANY_TO_ONE";
-  }
-
-  return "MANY_TO_MANY";
-}
-
 function findRepositoryContext(source, offset) {
   for (const repository of findRepositoryDeclarations(source)) {
     if (offset >= repository.bodyStart && offset <= repository.bodyEnd) {
@@ -511,7 +402,6 @@ function findStringLiteralEnd(source, start) {
 }
 
 module.exports = {
-  collectLanguageWorkspaceSchemaFromSources,
   findQueryDecoratedRepositoryMembers,
   findQueryDecoratorDiagnostics,
   findQueryParameterCompletionContext,
@@ -520,5 +410,4 @@ module.exports = {
   findRepositoryMethodDeclarations,
   getMethodPrefixAtOffset,
   isEntityFile,
-  parseEntitySchemasFromText,
 };

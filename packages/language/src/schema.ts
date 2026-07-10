@@ -1,4 +1,5 @@
 import type { MigrationEntitySchema } from "@node-persistence-api/core";
+import { parseEntitySchemasFromSource } from "@node-persistence-api/core/adapter";
 import {
   NPALanguageEntityPropertyKind,
   NPALanguageEntityRelationKind,
@@ -6,6 +7,30 @@ import {
   type NPALanguageEntitySchema,
   type NPALanguageWorkspaceSchema,
 } from "./types";
+
+export interface NPALanguageEntitySource {
+  filePath: string;
+  text: string;
+}
+
+export function parseLanguageEntitySchemasFromSource(
+  source: string,
+  filePath = "",
+): NPALanguageEntitySchema[] {
+  return parseEntitySchemasFromSource(source, filePath).map(
+    toNPALanguageEntitySchema,
+  );
+}
+
+export function collectLanguageWorkspaceSchemaFromSources(
+  sources: NPALanguageEntitySource[],
+): NPALanguageWorkspaceSchema {
+  return {
+    entities: sources.flatMap((source) =>
+      parseLanguageEntitySchemasFromSource(source.text, source.filePath),
+    ),
+  };
+}
 
 export function toNPALanguageEntitySchema(
   entity: MigrationEntitySchema,

@@ -54,6 +54,13 @@ export function discoverEntitySchemas(
 
 export function parseEntitySchemas(filePath: string): MigrationEntitySchema[] {
   const source = fs.readFileSync(filePath, "utf8");
+  return parseEntitySchemasFromSource(source, filePath);
+}
+
+export function parseEntitySchemasFromSource(
+  source: string,
+  filePath = "",
+): MigrationEntitySchema[] {
   const entities: MigrationEntitySchema[] = [];
   const enumValuesByName = readEnumDeclarations(source);
   const entityPattern = /@Entity(?:\(([\s\S]*?)\))?\s*(?:export\s+)?class\s+([A-Za-z_]\w*)/g;

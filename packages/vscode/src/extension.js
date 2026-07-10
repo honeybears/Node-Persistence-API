@@ -1,10 +1,10 @@
 const vscode = require("vscode");
 const {
+  collectLanguageWorkspaceSchemaFromSources,
   getNPAQueryMethodCompletions,
   validateNPAQueryMethod,
 } = loadNPALanguage();
 const {
-  collectLanguageWorkspaceSchemaFromSources,
   findQueryDecoratorDiagnostics,
   findQueryParameterCompletionContext,
   findRepositoryContext,
