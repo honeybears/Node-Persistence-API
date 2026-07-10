@@ -72,6 +72,7 @@ function databaseErrorDetails(error: unknown): Record<string, unknown> | undefin
   return {
     driverCode: error.code,
     constraint: error.constraint,
+    detail: error.detail,
     table: error.table,
     column: error.column,
   };

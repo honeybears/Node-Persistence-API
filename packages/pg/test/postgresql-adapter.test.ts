@@ -915,6 +915,7 @@ describe("PostgreSQL adapter", () => {
       details: {
         adapter: "postgresql",
         constraint: "products_pkey",
+        detail: "Key already exists.",
         driverCode: "23505",
         text: 'SELECT * FROM "products" WHERE "product_id" = $1 LIMIT 1',
         values: [10],
