@@ -326,13 +326,6 @@ class QueryCompiler {
       : "*";
   }
 
-  private conditionColumn(
-    condition: QueryCondition,
-    ignoreCase: boolean,
-  ): string {
-    return this.conditionColumns(condition, ignoreCase)[0];
-  }
-
   private conditionColumns(
     condition: QueryCondition,
     ignoreCase: boolean,

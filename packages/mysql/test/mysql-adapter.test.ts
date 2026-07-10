@@ -912,7 +912,7 @@ describe("MySQL adapter", () => {
     const events = [];
     const slowQueries = [];
     const queryable = {
-      async query(text, values) {
+      async query(_text, values) {
         return [[{ product_id: values[0], product_name: "desk" }], []];
       },
     };

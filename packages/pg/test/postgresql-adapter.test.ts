@@ -844,7 +844,7 @@ describe("PostgreSQL adapter", () => {
     const events = [];
     const slowQueries = [];
     const queryable = {
-      async query(text, values) {
+      async query(_text, values) {
         return {
           rows: [{ product_id: values[0], product_name: "desk" }],
           rowCount: 1,
