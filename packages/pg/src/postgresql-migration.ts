@@ -131,7 +131,8 @@ export function compilePostgresqlSchemaStatements(
   return [
     ...compilePostgresqlNamespaceStatements(entities),
     ...desiredTables.flatMap((table) => compilePostgresqlCreateTableStatements(table)),
-    ...desiredTables.flatMap((table) => compilePostgresqlForeignKeyDiffStatements(table, new Map())),
+    ...desiredTables.flatMap((table) =>
+      compilePostgresqlForeignKeyDiff(table, new Map()).addStatements),
   ];
 }
 
@@ -448,16 +449,16 @@ function compilePostgresqlTableDiffStatements(
   currentTables: Map<string, CurrentTableSchema>,
 ): string[] {
   const statements: string[] = [];
-  const foreignKeyStatements: string[] = [];
+  const foreignKeyDropStatements: string[] = [];
+  const foreignKeyAddStatements: string[] = [];
 
   for (const table of desiredTables) {
     const currentTable = currentTables.get(tableKey(table));
 
     if (!currentTable?.exists) {
       statements.push(...compilePostgresqlCreateTableStatements(table));
-      foreignKeyStatements.push(
-        ...compilePostgresqlForeignKeyDiffStatements(table, new Map()),
-      );
+      const foreignKeyDiff = compilePostgresqlForeignKeyDiff(table, new Map());
+      foreignKeyAddStatements.push(...foreignKeyDiff.addStatements);
       continue;
     }
 
@@ -520,12 +521,19 @@ function compilePostgresqlTableDiffStatements(
         currentTable.checkConstraints,
       ),
     );
-    foreignKeyStatements.push(
-      ...compilePostgresqlForeignKeyDiffStatements(table, currentTable.foreignKeys),
+    const foreignKeyDiff = compilePostgresqlForeignKeyDiff(
+      table,
+      currentTable.foreignKeys,
     );
+    foreignKeyDropStatements.push(...foreignKeyDiff.dropStatements);
+    foreignKeyAddStatements.push(...foreignKeyDiff.addStatements);
   }
 
-  return [...statements, ...foreignKeyStatements];
+  return [
+    ...foreignKeyDropStatements,
+    ...statements,
+    ...foreignKeyAddStatements,
+  ];
 }
 
 function migrationReadTables(
@@ -629,11 +637,21 @@ function compilePostgresqlColumnSequenceStatements(
     : [];
 }
 
-function compilePostgresqlForeignKeyDiffStatements(
+function compilePostgresqlForeignKeyDiff(
   table: MigrationTableSchema,
   currentForeignKeys: Map<string, CurrentForeignKeySchema>,
-): string[] {
-  const statements: string[] = [];
+): { dropStatements: string[]; addStatements: string[] } {
+  const dropStatements: string[] = [];
+  const addStatements: string[] = [];
+  const desiredNames = new Set(table.foreignKeys.map((foreignKey) => foreignKey.name));
+
+  for (const foreignKey of [...currentForeignKeys.values()].sort(compareByName)) {
+    if (!desiredNames.has(foreignKey.name)) {
+      dropStatements.push(
+        `ALTER TABLE ${qualifiedTable(table)} DROP CONSTRAINT ${quoteQualifiedIdentifier(foreignKey.name)}`,
+      );
+    }
+  }
 
   for (const foreignKey of [...table.foreignKeys].sort(compareByName)) {
     const currentForeignKey = currentForeignKeys.get(foreignKey.name);
@@ -643,17 +661,17 @@ function compilePostgresqlForeignKeyDiffStatements(
     }
 
     if (currentForeignKey) {
-      statements.push(
+      dropStatements.push(
         `ALTER TABLE ${qualifiedTable(table)} DROP CONSTRAINT ${quoteQualifiedIdentifier(foreignKey.name)}`,
       );
     }
 
-    statements.push(
+    addStatements.push(
       `ALTER TABLE ${qualifiedTable(table)} ADD ${compilePostgresqlForeignKeyConstraint(foreignKey)}`,
     );
   }
 
-  return statements;
+  return { dropStatements, addStatements };
 }
 
 function isSamePostgresqlForeignKey(

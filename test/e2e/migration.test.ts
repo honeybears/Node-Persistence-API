@@ -674,6 +674,9 @@ describe("migration E2E", () => {
       const categoryTableName = uniqueTableName(
         `${adapter.tablePrefix}_migrate_diff_category`,
       );
+      const replacementCategoryTableName = uniqueTableName(
+        `${adapter.tablePrefix}_migrate_diff_category_next`,
+      );
       const joinTableName = uniqueTableName(
         `${adapter.tablePrefix}_migrate_diff_join`,
       );
@@ -749,6 +752,68 @@ describe("migration E2E", () => {
 
         writeProductEntity(root, {
           tableName,
+          categoryTableName: replacementCategoryTableName,
+          joinTableName,
+          statusIndexName,
+          skuUniqueIndexName,
+          withRelations: true,
+        });
+        const replacementForeignKey = foreignKeyName(
+          joinTableName,
+          ["category_id"],
+          replacementCategoryTableName,
+          adapter.adapterName === "postgresql" ? 63 : 64,
+        );
+        const retargeted = runCli(
+          [
+            "db",
+            "push",
+            "--allow-destructive",
+            "--config",
+            "npa.config.mjs",
+          ],
+          root,
+        );
+        expectCliSuccess(retargeted);
+        const retargetedForeignKeys = await readForeignKeyNames(
+          adapter,
+          queryable,
+          joinTableName,
+        );
+        expect(retargetedForeignKeys)
+          .toEqual(expect.arrayContaining([replacementForeignKey]));
+        expect(retargetedForeignKeys).not.toContain(foreignKey);
+
+        writeProductEntity(root, {
+          tableName,
+          categoryTableName,
+          joinTableName,
+          statusIndexName,
+          skuUniqueIndexName,
+          withRelations: true,
+        });
+        const restoredForeignKey = runCli(
+          [
+            "db",
+            "push",
+            "--allow-destructive",
+            "--config",
+            "npa.config.mjs",
+          ],
+          root,
+        );
+        expectCliSuccess(restoredForeignKey);
+        const restoredForeignKeys = await readForeignKeyNames(
+          adapter,
+          queryable,
+          joinTableName,
+        );
+        expect(restoredForeignKeys)
+          .toEqual(expect.arrayContaining([foreignKey]));
+        expect(restoredForeignKeys).not.toContain(replacementForeignKey);
+
+        writeProductEntity(root, {
+          tableName,
           categoryTableName,
           joinTableName,
           statusIndexName,
@@ -809,6 +874,7 @@ describe("migration E2E", () => {
           if (queryable) {
             for (const table of [
               joinTableName,
+              replacementCategoryTableName,
               categoryTableName,
               tableName,
               "_npa_migrations",
@@ -1595,6 +1661,32 @@ async function readForeignKeys(adapter, queryable, tableName) {
   }
 
   return foreignKeys;
+}
+
+async function readForeignKeyNames(adapter, queryable, tableName) {
+  const rows = await queryRows(
+    queryable,
+    adapter.adapterName === "postgresql"
+      ? [
+          'SELECT constraint_name AS "constraintName"',
+          "FROM information_schema.table_constraints",
+          "WHERE constraint_type = 'FOREIGN KEY'",
+          "  AND table_schema = 'public'",
+          "  AND table_name = $1",
+          "ORDER BY constraint_name",
+        ].join("\n")
+      : [
+          "SELECT CONSTRAINT_NAME AS constraintName",
+          "FROM information_schema.table_constraints",
+          "WHERE CONSTRAINT_TYPE = 'FOREIGN KEY'",
+          "  AND TABLE_SCHEMA = DATABASE()",
+          "  AND TABLE_NAME = ?",
+          "ORDER BY CONSTRAINT_NAME",
+        ].join("\n"),
+    [tableName],
+  );
+
+  return rows.map((row) => row.constraintName);
 }
 
 async function readMigrationHistory(adapter, queryable, name) {

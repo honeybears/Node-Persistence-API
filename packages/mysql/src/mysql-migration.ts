@@ -134,7 +134,8 @@ export function compileMysqlSchemaStatements(
   return [
     ...compileMysqlNamespaceStatements(entities),
     ...desiredTables.flatMap((table) => compileMysqlCreateTableStatements(table)),
-    ...desiredTables.flatMap((table) => compileMysqlForeignKeyDiffStatements(table, new Map())),
+    ...desiredTables.flatMap((table) =>
+      compileMysqlForeignKeyDiff(table, new Map()).addStatements),
   ];
 }
 
@@ -444,16 +445,16 @@ function compileMysqlTableDiffStatements(
   currentTables: Map<string, CurrentTableSchema>,
 ): string[] {
   const statements: string[] = [];
-  const foreignKeyStatements: string[] = [];
+  const foreignKeyDropStatements: string[] = [];
+  const foreignKeyAddStatements: string[] = [];
 
   for (const table of desiredTables) {
     const currentTable = currentTables.get(tableKey(table));
 
     if (!currentTable?.exists) {
       statements.push(...compileMysqlCreateTableStatements(table));
-      foreignKeyStatements.push(
-        ...compileMysqlForeignKeyDiffStatements(table, new Map()),
-      );
+      const foreignKeyDiff = compileMysqlForeignKeyDiff(table, new Map());
+      foreignKeyAddStatements.push(...foreignKeyDiff.addStatements);
       continue;
     }
 
@@ -502,7 +503,6 @@ function compileMysqlTableDiffStatements(
       ...compileMysqlIndexDiffStatements(
         table,
         currentTable.indexes,
-        currentTable.foreignKeys,
       ),
     );
     statements.push(
@@ -511,12 +511,19 @@ function compileMysqlTableDiffStatements(
         currentTable.checkConstraints,
       ),
     );
-    foreignKeyStatements.push(
-      ...compileMysqlForeignKeyDiffStatements(table, currentTable.foreignKeys),
+    const foreignKeyDiff = compileMysqlForeignKeyDiff(
+      table,
+      currentTable.foreignKeys,
     );
+    foreignKeyDropStatements.push(...foreignKeyDiff.dropStatements);
+    foreignKeyAddStatements.push(...foreignKeyDiff.addStatements);
   }
 
-  return [...statements, ...foreignKeyStatements];
+  return [
+    ...foreignKeyDropStatements,
+    ...statements,
+    ...foreignKeyAddStatements,
+  ];
 }
 
 function migrationReadTables(
@@ -597,11 +604,21 @@ function compileMysqlCreateTableStatements(table: MigrationTableSchema): string[
   ];
 }
 
-function compileMysqlForeignKeyDiffStatements(
+function compileMysqlForeignKeyDiff(
   table: MigrationTableSchema,
   currentForeignKeys: Map<string, CurrentForeignKeySchema>,
-): string[] {
-  const statements: string[] = [];
+): { dropStatements: string[]; addStatements: string[] } {
+  const dropStatements: string[] = [];
+  const addStatements: string[] = [];
+  const desiredNames = new Set(table.foreignKeys.map((foreignKey) => foreignKey.name));
+
+  for (const foreignKey of [...currentForeignKeys.values()].sort(compareByName)) {
+    if (!desiredNames.has(foreignKey.name)) {
+      dropStatements.push(
+        `ALTER TABLE ${qualifiedTable(table)} DROP FOREIGN KEY ${quoteQualifiedIdentifier(foreignKey.name)}`,
+      );
+    }
+  }
 
   for (const foreignKey of [...table.foreignKeys].sort(compareByName)) {
     const currentForeignKey = currentForeignKeys.get(foreignKey.name);
@@ -611,17 +628,17 @@ function compileMysqlForeignKeyDiffStatements(
     }
 
     if (currentForeignKey) {
-      statements.push(
+      dropStatements.push(
         `ALTER TABLE ${qualifiedTable(table)} DROP FOREIGN KEY ${quoteQualifiedIdentifier(foreignKey.name)}`,
       );
     }
 
-    statements.push(
+    addStatements.push(
       `ALTER TABLE ${qualifiedTable(table)} ADD ${compileMysqlForeignKeyConstraint(foreignKey)}`,
     );
   }
 
-  return statements;
+  return { dropStatements, addStatements };
 }
 
 function isSameMysqlForeignKey(
@@ -641,7 +658,6 @@ function isSameMysqlForeignKey(
 function compileMysqlIndexDiffStatements(
   table: MigrationTableSchema,
   currentIndexes: Map<string, CurrentIndexSchema>,
-  currentForeignKeys: Map<string, CurrentForeignKeySchema>,
 ): string[] {
   const statements: string[] = [];
 
@@ -672,7 +688,7 @@ function compileMysqlIndexDiffStatements(
     if (
       !currentIndex.primary &&
       !desiredIndexNames.has(currentIndex.name) &&
-      !isForeignKeySupportingIndex(currentIndex, currentForeignKeys)
+      !isForeignKeySupportingIndex(currentIndex, table.foreignKeys)
     ) {
       statements.push(`ALTER TABLE ${qualifiedTable(table)} DROP INDEX ${quoteQualifiedIdentifier(currentIndex.name)}`);
     }
@@ -683,9 +699,9 @@ function compileMysqlIndexDiffStatements(
 
 function isForeignKeySupportingIndex(
   index: CurrentIndexSchema,
-  foreignKeys: Map<string, CurrentForeignKeySchema>,
+  foreignKeys: MigrationForeignKeySchema[],
 ): boolean {
-  return [...foreignKeys.values()].some((foreignKey) =>
+  return foreignKeys.some((foreignKey) =>
     foreignKey.columns.every((column, position) => index.columns[position] === column),
   );
 }
