@@ -568,6 +568,10 @@ When multiple `NPA` instances register transaction managers, pass
 `name: 'main'` to each instance and choose one explicitly with
 `@Transactional({ managerName: 'main' })`.
 
+Call `npa.dispose()` when the application lifecycle ends to unregister the
+transaction manager used by the decorator fallback. This does not close the
+database connection; close the adapter connection separately.
+
 MySQL uses the same core decorator with
 `@node-persistence-api/connector-mysql`. Transaction options currently support
 `isolation`, `readOnly`, `TransactionPropagation.REQUIRED`,

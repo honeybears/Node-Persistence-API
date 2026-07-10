@@ -43,6 +43,8 @@ export interface NPAOptions {
 export type CreateNPAOptions = NPAOptions;
 
 export interface NPAApplication {
+  dispose(): void;
+
   get<TRepository extends object>(
     repository: NPARepositoryTarget<TRepository>,
   ): TRepository;
@@ -53,6 +55,7 @@ class NPA implements NPAApplication {
   private readonly allowedRepositories?: Set<NPARepositoryTarget>;
   private readonly adapter: NPARuntimeAdapter;
   private readonly operations?: NPAOperationsOptions;
+  private readonly unregisterTransactionManager?: () => void;
 
   constructor(options: NPAOptions) {
     this.adapter = options.adapter;
@@ -81,8 +84,15 @@ class NPA implements NPAApplication {
       options.transactionManager ?? options.adapter.transactionManager;
 
     if (transactionManager) {
-      registerTransactionManager(transactionManager, options.name);
+      this.unregisterTransactionManager = registerTransactionManager(
+        transactionManager,
+        options.name,
+      );
     }
+  }
+
+  dispose(): void {
+    this.unregisterTransactionManager?.();
   }
 
   get<TRepository extends object>(

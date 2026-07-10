@@ -520,6 +520,108 @@ describe("transaction manager", () => {
     ]);
   });
 
+  test("disposing NPA unregisters its transaction manager", async () => {
+    const manager = new RecordingTransactionManager();
+    const npa = createNPA({
+      adapter: {
+        createRepository() {
+          throw new Error("unexpected repository creation");
+        },
+      },
+      repositories: [],
+      transactionManager: manager,
+    });
+
+    class UserService {
+      async count(): Promise<boolean> {
+        return manager.isTransactionActive();
+      }
+    }
+
+    decorateMethod(UserService, "count", Transactional());
+    npa.dispose();
+    npa.dispose();
+
+    await expect(new UserService().count()).rejects.toMatchObject({
+      code: "NPA_TRANSACTION_MANAGER_NOT_FOUND",
+    });
+  });
+
+  test("shared transaction manager remains registered until every NPA is disposed", async () => {
+    const manager = new RecordingTransactionManager();
+    const adapter = {
+      createRepository() {
+        throw new Error("unexpected repository creation");
+      },
+    };
+    const first = createNPA({
+      adapter,
+      repositories: [],
+      transactionManager: manager,
+    });
+    const second = createNPA({
+      adapter,
+      repositories: [],
+      transactionManager: manager,
+    });
+
+    class UserService {
+      async count(): Promise<boolean> {
+        return manager.isTransactionActive();
+      }
+    }
+
+    decorateMethod(UserService, "count", Transactional());
+    first.dispose();
+
+    await expect(new UserService().count()).resolves.toEqual(true);
+
+    second.dispose();
+    await expect(new UserService().count()).rejects.toMatchObject({
+      code: "NPA_TRANSACTION_MANAGER_NOT_FOUND",
+    });
+  });
+
+  test("disposing named NPA registrations allows the name to be reused", async () => {
+    const firstManager = new RecordingTransactionManager();
+    const secondManager = new RecordingTransactionManager();
+    const adapter = {
+      createRepository() {
+        throw new Error("unexpected repository creation");
+      },
+    };
+    const first = createNPA({
+      adapter,
+      name: "main",
+      repositories: [],
+      transactionManager: firstManager,
+    });
+
+    first.dispose();
+
+    const second = createNPA({
+      adapter,
+      name: "main",
+      repositories: [],
+      transactionManager: secondManager,
+    });
+
+    class UserService {
+      async count(): Promise<boolean> {
+        return secondManager.isTransactionActive();
+      }
+    }
+
+    decorateMethod(
+      UserService,
+      "count",
+      Transactional({ managerName: "main" }),
+    );
+
+    await expect(new UserService().count()).resolves.toEqual(true);
+    second.dispose();
+  });
+
   test("Transactional decorator requires a name when multiple managers are registered", async () => {
     const userManager = new RecordingTransactionManager();
     const auditManager = new RecordingTransactionManager();

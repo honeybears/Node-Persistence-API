@@ -10,23 +10,26 @@ async function main(): Promise<void> {
   });
   const users = npa.get(UserRepository);
 
-  console.log("findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc");
-  console.log(
-    await users.findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc(
-      "KIM",
-    ),
-  );
+  try {
+    console.log("findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc");
+    console.log(
+      await users.findDistinctTop10ByNameContainingIgnoreCaseOrderByCreatedAtDesc(
+        "KIM",
+      ),
+    );
 
-  console.log("findFirstByEmailAllIgnoreCase");
-  console.log(await users.findFirstByEmailAllIgnoreCase("KIM@EXAMPLE.COM"));
+    console.log("findFirstByEmailAllIgnoreCase");
+    console.log(await users.findFirstByEmailAllIgnoreCase("KIM@EXAMPLE.COM"));
 
-  console.log("existsByEmailIgnoreCase");
-  console.log(await users.existsByEmailIgnoreCase("KIM@EXAMPLE.COM"));
+    console.log("existsByEmailIgnoreCase");
+    console.log(await users.existsByEmailIgnoreCase("KIM@EXAMPLE.COM"));
 
-  console.log("countDistinctByEmailIgnoreCase");
-  console.log(await users.countDistinctByEmailIgnoreCase("KIM@EXAMPLE.COM"));
-
-  await connection.close();
+    console.log("countDistinctByEmailIgnoreCase");
+    console.log(await users.countDistinctByEmailIgnoreCase("KIM@EXAMPLE.COM"));
+  } finally {
+    npa.dispose();
+    await connection.close();
+  }
 }
 
 main().catch((error) => {
