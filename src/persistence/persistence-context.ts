@@ -863,27 +863,40 @@ function canInsertNow(
 }
 
 function hasLoadedManyToManyChanges(managed: ManagedEntity): boolean {
-  return managed.metadata.relations.some((relation) => {
-    if (relation.kind !== RelationKind.MANY_TO_MANY) {
-      return false;
-    }
-
-    const currentIds = readManyToManyRelationIds(managed.entity, relation);
-    return currentIds !== undefined &&
-      !isSameIdSet(currentIds, managed.snapshot.get(relation.propertyName));
-  });
+  return managed.metadata.relations.some((relation) =>
+    relation.kind === RelationKind.MANY_TO_MANY &&
+    hasLoadedRelationChanges(managed, relation));
 }
 
 function hasLoadedOneToManyChanges(managed: ManagedEntity): boolean {
-  return managed.metadata.relations.some((relation) => {
-    if (relation.kind !== RelationKind.ONE_TO_MANY) {
-      return false;
-    }
+  return managed.metadata.relations.some((relation) =>
+    relation.kind === RelationKind.ONE_TO_MANY &&
+    hasLoadedRelationChanges(managed, relation));
+}
 
+function hasLoadedRelationChanges(
+  managed: ManagedEntity,
+  relation: RelationMetadata,
+): boolean {
+  if (isOwningToOneRelation(relation)) {
+    const currentId = readRelationForeignKey(managed.entity, relation);
+    return currentId !== undefined &&
+      !isSameEntityId(currentId, managed.snapshot.get(relation.propertyName));
+  }
+
+  if (relation.kind === RelationKind.ONE_TO_MANY) {
     const currentIds = readToManyRelationIds(managed.entity, relation);
     return currentIds !== undefined &&
       !isSameIdSet(currentIds, managed.snapshot.get(relation.propertyName));
-  });
+  }
+
+  if (relation.kind === RelationKind.MANY_TO_MANY) {
+    const currentIds = readManyToManyRelationIds(managed.entity, relation);
+    return currentIds !== undefined &&
+      !isSameIdSet(currentIds, managed.snapshot.get(relation.propertyName));
+  }
+
+  return false;
 }
 
 function diffEntity<TEntity extends object>(
@@ -987,11 +1000,21 @@ function mergeManagedEntity<TEntity extends object>(
   managed: ManagedEntity<TEntity>,
   incoming: TEntity,
 ): void {
+  const dirtyRelations = new Set(
+    managed.metadata.relations
+      .filter((relation) => hasLoadedRelationChanges(managed, relation))
+      .map((relation) => relation.propertyName),
+  );
   const wasDirty =
     Object.keys(diffEntity(managed.entity, managed.snapshot, managed.metadata))
-      .length > 0;
+      .length > 0 || dirtyRelations.size > 0;
 
-  mergeLoadedRelations(managed.entity, incoming, managed.metadata);
+  mergeLoadedRelations(
+    managed.entity,
+    incoming,
+    managed.metadata,
+    dirtyRelations,
+  );
 
   if (wasDirty) {
     return;
@@ -1031,8 +1054,13 @@ function mergeLoadedRelations(
   target: object,
   source: object,
   metadata: EntityMetadata,
+  excludedProperties: ReadonlySet<string>,
 ): void {
   for (const relation of metadata.relations) {
+    if (excludedProperties.has(relation.propertyName)) {
+      continue;
+    }
+
     const property = readOwnDataProperty(source, relation.propertyName);
 
     if (!property.found) {

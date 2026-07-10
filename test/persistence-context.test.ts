@@ -666,6 +666,53 @@ describe("persistence context", () => {
     expect(updates).toEqual([{ id: 2, patch: { name: "dirty" } }]);
   });
 
+  test("keeps dirty relation values when the same identity is loaded again", async () => {
+    const calls: string[] = [];
+    const context = new PersistenceContext();
+    const adapter = {
+      async updateDirty(entity: User) {
+        return entity;
+      },
+      async syncManyToManyRelations(
+        _entity: User,
+        id: unknown,
+        relation: { propertyName: string },
+        targetIds: unknown[],
+      ) {
+        calls.push(`${relation.propertyName}:${id}:${targetIds.join(",")}`);
+      },
+    };
+    const managed = context.manage<User>(
+      {
+        user_id: 4,
+        full_name: "kim",
+        active: true,
+        roles: [{ role_id: 10, label: "admin" }],
+      } as unknown as User,
+      { entity: User, adapter },
+    );
+
+    managed.roles = [
+      { role_id: 10, label: "admin" } as unknown as Role,
+      { role_id: 20, label: "writer" } as unknown as Role,
+    ];
+
+    const same = context.manage<User>(
+      {
+        user_id: 4,
+        full_name: "kim",
+        active: true,
+        roles: [{ role_id: 10, label: "admin" }],
+      } as unknown as User,
+      { entity: User, adapter },
+    );
+    await context.flush();
+
+    expect(same).toBe(managed);
+    expect(managed.roles.map((role) => role.label)).toEqual(["admin", "writer"]);
+    expect(calls).toEqual(["roles:4:10,20"]);
+  });
+
   test("removes identity entries when managed entities are detached", () => {
     const context = new PersistenceContext();
     const adapter = {
