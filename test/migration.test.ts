@@ -562,6 +562,42 @@ describe("migration metadata", () => {
     );
   });
 
+  test("creates a join table only for the owning many-to-many relation", () => {
+    const schemas = parseEntitySource(`
+      import { Entity, Id, ManyToMany } from "@npa/test";
+
+      @Entity({ name: "users" })
+      class User {
+        @Id({ name: "user_id" })
+        id!: number;
+
+        @ManyToMany(() => Role, { joinTable: "user_roles" })
+        roles!: Role[];
+      }
+
+      @Entity({ name: "roles" })
+      class Role {
+        @Id({ name: "role_id" })
+        id!: number;
+
+        @ManyToMany(() => User, { mappedBy: "roles" })
+        users!: User[];
+      }
+    `);
+
+    const postgresql = compilePostgresqlMigrationStatements({ entities: schemas });
+    const mysql = compileMysqlMigrationStatements({ entities: schemas });
+
+    expect(postgresql.join("\n")).toContain(
+      'CREATE TABLE IF NOT EXISTS "user_roles"',
+    );
+    expect(postgresql.join("\n")).not.toContain('"roles_users"');
+    expect(mysql.join("\n")).toContain(
+      "CREATE TABLE IF NOT EXISTS `user_roles`",
+    );
+    expect(mysql.join("\n")).not.toContain("`roles_users`");
+  });
+
   test("creates composite relation foreign keys", () => {
     const schemas = parseEntitySource(`
       import { Column, Entity, Id, ManyToOne } from "@npa/test";

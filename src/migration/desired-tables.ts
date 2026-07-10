@@ -152,7 +152,10 @@ function buildJoinTables(
 
   for (const entity of entities) {
     for (const relation of entity.relations ?? []) {
-      if (relation.kind !== MigrationRelationKind.MANY_TO_MANY) {
+      if (
+        relation.kind !== MigrationRelationKind.MANY_TO_MANY ||
+        relation.mappedBy
+      ) {
         continue;
       }
 
